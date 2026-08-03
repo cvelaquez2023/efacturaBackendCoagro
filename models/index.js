@@ -36,6 +36,8 @@ const models = {
   subtipoDocCCModel: require("./subtipoDocCC"),
   auxiliarCCModel: require("./AuxiliarCC"),
   responsable: require("./Responsable"),
+  globalesRuteoModel: require("./fr/GlobalesRuteo"),
+  visitaModel: require("./fr/Visita"),
 };
 
 module.exports = models;

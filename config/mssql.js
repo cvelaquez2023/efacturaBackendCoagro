@@ -8,6 +8,10 @@ const schema = process.env.SQL_SCHEMA;
 
 //const sequelize = new Sequelize(database, username, "Master#$2021", {
 const sequelize = new Sequelize(database, username, password, {
+//database - COAGRO2
+//user - sa
+//Password - Houdelot777$
+
   host: host,
   dialect: "mssql",
   omitNull: true,
