@@ -1,0 +1,224 @@
+/*Font include*/
+@import url("https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&display=swap");
+
+body {
+    margin: 0;
+    padding: 0;
+    font-size: 16px;
+    font-weight: 300;
+    width: 100%;
+    background: rgb(204, 204, 204);
+    font-family: 'Roboto Condensed', sans-serif;
+}
+
+h2, h4, p {
+    margin: 0;
+}
+
+.page {
+    background: #ffffff;
+    display: block;
+    margin: 3rem auto 3rem auto;
+    position: relative;
+    box-shadow: 0 0 0.5cm rgba(0, 0, 0, 0.5)
+}
+
+.page[size="A4"] {
+    width: 21cm;
+    height: 29.7cm;
+    overflow-x: hidden;
+}
+
+/*Top Section*/
+.top-section {
+    color: #fff;
+    padding: 10px;
+    height: 180px;
+    background-color: #810635;
+}
+
+.top-section h2 {
+    font-size: 30px;
+    margin-bottom: 10px;
+    font-weight: 400;
+}
+
+
+.top-section .address {
+    width: 25%;
+    height: 100%;
+    float: left;
+
+}
+
+.top-section .contact {
+    width: 50%;
+    height: 100%;
+    float: left;
+    text-align: left;
+    border-radius: 10px;
+    border: 2px solid #fff;
+    padding-bottom: 2px;
+}
+
+
+.contact .contact-content {
+    width: 100%;
+    float: right;
+    padding: 10px;
+
+}
+
+
+.contact .contact-content div, span {
+    font-size: 12px;
+}
+
+.titulo,
+.subtitulo {
+    width: 100%;
+    text-align: center;
+    font-weight: bold;
+}
+
+
+
+
+
+.qr {
+    width: 25%;
+    float: right;
+    height: 50px;
+}
+
+.contenedorQR {
+
+    justify-content: center;
+    padding: 0;
+    height: 50px;
+}
+
+.contenedorQR svg {
+    margin-left: 14px;
+    justify-content: center;
+    width: 165px;
+    height: 160px;
+
+}
+
+.logo {
+    justify-content: center;
+    margin-left: 10px;
+    width: 165px;
+    height: 150px;
+    border-radius: 10px;
+}
+
+.billing-to {
+    padding: 8px;
+    margin-top: 10px;
+
+
+}
+
+.emisor {
+    margin-bottom: 5px;
+}
+
+.tabla1 {
+    width: 49.5%;
+    float: left;
+    border-collapse: collapse;
+    font-size: 11px;
+    text-align: left;
+    border: 2px solid #810635;
+    border-radius: 10px;
+
+}
+
+.tabla2 {
+    width: 49.5%;
+    float: right;
+    border-collapse: collapse;
+    font-size: 11px;
+    text-align: left;
+    margin-bottom: 8px;
+    border: 2px solid #810635;
+    border-radius: 10px;
+}
+
+.title {
+    width: 100%;
+    text-align: center !important;
+    align-items: center;
+    font-weight: 700;
+}
+
+td, th {
+    padding-left: 4px;
+    border: 1px solid #810635;
+}
+
+/* Tabla de item*/
+
+.tablaItem {
+    margin-left: 17px;
+    margin-right: 17px;
+}
+
+.tablaItem table {
+    width: 100%;
+}
+
+.tablaItems th {
+    text-align: center;
+    padding: 5px;
+    font-size: 9px;
+    border-collapse: collapse;
+    font-weight: bold;
+}
+
+.tablaItems td {
+    text-align: center;
+    padding: 5px;
+    font-size: 9px;
+    border-collapse: collapse;
+    font-weight: 400;
+}
+
+.tablaItems tr:first-child {
+    color: #fff;
+    background-color: #810635;
+}
+
+.tablaResumen {
+    float: right;
+    width: 40%;
+    margin-right: 15px;
+    border: 2px solid #810635;
+    border-radius: 10px;
+}
+
+.tablaResumenes td {
+    font-size: 10px;
+    width: 75%;
+
+}
+
+.monto {
+    text-align: right;
+
+}
+
+.totalLetras {
+
+    width: 98%;
+    float: left;
+    margin-top: 5px;
+    margin-left: 5px;
+    padding: 10px;
+    background-color: #810635;
+    color: #fff;
+    border: 2px solid white;
+    border-radius: 10px;
+}

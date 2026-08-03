@@ -1,0 +1,101 @@
+tu app esta lista por http://localhost:5000
+Executing (default): SELECT 1+1 AS result
+conexion correcta
+Listo el Servidor de Correos
+Executing (default): SELECT ART.ARTICULO, ART.DESCRIPCION, ART.CLASIFICACION_1, ART.CLASIFICACION_2, ART.CLASIFICACION_3, ART.CLASIFICACION_4, ART.CLASIFICACION_5, ART.CLASIFICACION_6, ART.PESO_NETO,ART.PESO_BRUTO, ART.VOLUMEN,ART.ACTIVO, ART.ESTILO, ART.TALLA, ART.COLOR, ART.GALERIA_IMAGENES, ART.IMAGEN_VERTICAL, ART.IMAGEN_HORIZONTAL, ART.IMAGEN, ART.ESPECIFICACIONES, ART.VISTAS , ROUND((pre.PRECIO*1.13),2) AS PRECIO , ex.CANT_DISPONIBLE FROM bellmart.ARTICULO AS ART ,bellmart.ARTICULO_PRECIO pre ,bellmart.EXISTENCIA_BODEGA ex WHERE VER_TIENDA=true and pre.ARTICULO=ART.ARTICULO and ex.ARTICULO=ART.ARTICULO and ex.BODEGA=(N'001') and ex.ARTICULO=ART.ARTICULO and pre.NIVEL_PRECIO=(N'PRECIO_LINEA') and pre.ARTICULO=art.ARTICULO
+Error
+    at Query.run (C:\Dev\bellmart\ApiJs\node_modules\sequelize\lib\dialects\mssql\query.js:107:25)
+    at C:\Dev\bellmart\ApiJs\node_modules\sequelize\lib\sequelize.js:315:28
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async getArticulos (C:\Dev\bellmart\ApiJs\controllers\articulo.js:108:18) {
+  name: 'SequelizeDatabaseError',
+  parent: RequestError: Invalid column name 'true'.
+      at RequestTokenHandler.onErrorMessage (C:\Dev\bellmart\ApiJs\node_modules\tedious\lib\token\handler.js:368:21)
+      at Readable.<anonymous> (C:\Dev\bellmart\ApiJs\node_modules\tedious\lib\token\token-stream-parser.js:26:33)
+      at Readable.emit (node:events:513:28)
+      at addChunk (node:internal/streams/readable:324:12)
+      at readableAddChunk (node:internal/streams/readable:297:9)
+      at Readable.push (node:internal/streams/readable:234:10)
+      at next (node:internal/streams/from:98:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+    code: 'EREQUEST',
+    number: 207,
+    state: 1,
+    class: 16,
+    serverName: 'DESKTOP-FBFPD01\\SQLSERVER',
+    procName: '',
+    lineNumber: 1,
+    sql: "SELECT ART.ARTICULO, ART.DESCRIPCION, ART.CLASIFICACION_1, ART.CLASIFICACION_2, ART.CLASIFICACION_3, ART.CLASIFICACION_4, ART.CLASIFICACION_5, ART.CLASIFICACION_6, ART.PESO_NETO,ART.PESO_BRUTO, ART.VOLUMEN,ART.ACTIVO, ART.ESTILO, ART.TALLA, ART.COLOR, ART.GALERIA_IMAGENES, ART.IMAGEN_VERTICAL, ART.IMAGEN_HORIZONTAL, ART.IMAGEN, ART.ESPECIFICACIONES, ART.VISTAS , ROUND((pre.PRECIO*1.13),2) AS PRECIO , ex.CANT_DISPONIBLE FROM bellmart.ARTICULO AS ART ,bellmart.ARTICULO_PRECIO pre ,bellmart.EXISTENCIA_BODEGA ex WHERE VER_TIENDA=true and pre.ARTICULO=ART.ARTICULO and ex.ARTICULO=ART.ARTICULO and ex.BODEGA=(N'001') and ex.ARTICULO=ART.ARTICULO and pre.NIVEL_PRECIO=(N'PRECIO_LINEA') and pre.ARTICULO=art.ARTICULO",
+    parameters: undefined
+  },
+  original: RequestError: Invalid column name 'true'.
+      at RequestTokenHandler.onErrorMessage (C:\Dev\bellmart\ApiJs\node_modules\tedious\lib\token\handler.js:368:21)
+      at Readable.<anonymous> (C:\Dev\bellmart\ApiJs\node_modules\tedious\lib\token\token-stream-parser.js:26:33)
+      at Readable.emit (node:events:513:28)
+      at addChunk (node:internal/streams/readable:324:12)
+      at readableAddChunk (node:internal/streams/readable:297:9)
+      at Readable.push (node:internal/streams/readable:234:10)
+      at next (node:internal/streams/from:98:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+    code: 'EREQUEST',
+    number: 207,
+    state: 1,
+    class: 16,
+    serverName: 'DESKTOP-FBFPD01\\SQLSERVER',
+    procName: '',
+    lineNumber: 1,
+    sql: "SELECT ART.ARTICULO, ART.DESCRIPCION, ART.CLASIFICACION_1, ART.CLASIFICACION_2, ART.CLASIFICACION_3, ART.CLASIFICACION_4, ART.CLASIFICACION_5, ART.CLASIFICACION_6, ART.PESO_NETO,ART.PESO_BRUTO, ART.VOLUMEN,ART.ACTIVO, ART.ESTILO, ART.TALLA, ART.COLOR, ART.GALERIA_IMAGENES, ART.IMAGEN_VERTICAL, ART.IMAGEN_HORIZONTAL, ART.IMAGEN, ART.ESPECIFICACIONES, ART.VISTAS , ROUND((pre.PRECIO*1.13),2) AS PRECIO , ex.CANT_DISPONIBLE FROM bellmart.ARTICULO AS ART ,bellmart.ARTICULO_PRECIO pre ,bellmart.EXISTENCIA_BODEGA ex WHERE VER_TIENDA=true and pre.ARTICULO=ART.ARTICULO and ex.ARTICULO=ART.ARTICULO and ex.BODEGA=(N'001') and ex.ARTICULO=ART.ARTICULO and pre.NIVEL_PRECIO=(N'PRECIO_LINEA') and pre.ARTICULO=art.ARTICULO",
+    parameters: undefined
+  },
+  sql: "SELECT ART.ARTICULO, ART.DESCRIPCION, ART.CLASIFICACION_1, ART.CLASIFICACION_2, ART.CLASIFICACION_3, ART.CLASIFICACION_4, ART.CLASIFICACION_5, ART.CLASIFICACION_6, ART.PESO_NETO,ART.PESO_BRUTO, ART.VOLUMEN,ART.ACTIVO, ART.ESTILO, ART.TALLA, ART.COLOR, ART.GALERIA_IMAGENES, ART.IMAGEN_VERTICAL, ART.IMAGEN_HORIZONTAL, ART.IMAGEN, ART.ESPECIFICACIONES, ART.VISTAS , ROUND((pre.PRECIO*1.13),2) AS PRECIO , ex.CANT_DISPONIBLE FROM bellmart.ARTICULO AS ART ,bellmart.ARTICULO_PRECIO pre ,bellmart.EXISTENCIA_BODEGA ex WHERE VER_TIENDA=true and pre.ARTICULO=ART.ARTICULO and ex.ARTICULO=ART.ARTICULO and ex.BODEGA=(N'001') and ex.ARTICULO=ART.ARTICULO and pre.NIVEL_PRECIO=(N'PRECIO_LINEA') and pre.ARTICULO=art.ARTICULO",
+  parameters: {}
+}
+Executing (default): SELECT ART.ARTICULO, ART.DESCRIPCION, ART.CLASIFICACION_1, ART.CLASIFICACION_2, ART.CLASIFICACION_3, ART.CLASIFICACION_4, ART.CLASIFICACION_5, ART.CLASIFICACION_6, ART.PESO_NETO,ART.PESO_BRUTO, ART.VOLUMEN,ART.ACTIVO, ART.ESTILO, ART.TALLA, ART.COLOR, ART.GALERIA_IMAGENES, ART.IMAGEN_VERTICAL, ART.IMAGEN_HORIZONTAL, ART.IMAGEN, ART.ESPECIFICACIONES, ART.VISTAS , ROUND((pre.PRECIO*1.13),2) AS PRECIO , ex.CANT_DISPONIBLE FROM bellmart.ARTICULO AS ART ,bellmart.ARTICULO_PRECIO pre ,bellmart.EXISTENCIA_BODEGA ex WHERE VER_TIENDA=true and pre.ARTICULO=ART.ARTICULO and ex.ARTICULO=ART.ARTICULO and ART.ARTICULO =(N'00694') and ex.BODEGA=(N'001') and ex.ARTICULO=ART.ARTICULO and pre.NIVEL_PRECIO=(N'PRECIO_LINEA') and pre.ARTICULO=art.ARTICULO
+Error
+    at Query.run (C:\Dev\bellmart\ApiJs\node_modules\sequelize\lib\dialects\mssql\query.js:107:25)
+    at C:\Dev\bellmart\ApiJs\node_modules\sequelize\lib\sequelize.js:315:28
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async getItem (C:\Dev\bellmart\ApiJs\controllers\articulo.js:83:18) {
+  name: 'SequelizeDatabaseError',
+  parent: RequestError: Invalid column name 'true'.
+      at RequestTokenHandler.onErrorMessage (C:\Dev\bellmart\ApiJs\node_modules\tedious\lib\token\handler.js:368:21)
+      at Readable.<anonymous> (C:\Dev\bellmart\ApiJs\node_modules\tedious\lib\token\token-stream-parser.js:26:33)
+      at Readable.emit (node:events:513:28)
+      at addChunk (node:internal/streams/readable:324:12)
+      at readableAddChunk (node:internal/streams/readable:297:9)
+      at Readable.push (node:internal/streams/readable:234:10)
+      at next (node:internal/streams/from:98:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+    code: 'EREQUEST',
+    number: 207,
+    state: 1,
+    class: 16,
+    serverName: 'DESKTOP-FBFPD01\\SQLSERVER',
+    procName: '',
+    lineNumber: 1,
+    sql: "SELECT ART.ARTICULO, ART.DESCRIPCION, ART.CLASIFICACION_1, ART.CLASIFICACION_2, ART.CLASIFICACION_3, ART.CLASIFICACION_4, ART.CLASIFICACION_5, ART.CLASIFICACION_6, ART.PESO_NETO,ART.PESO_BRUTO, ART.VOLUMEN,ART.ACTIVO, ART.ESTILO, ART.TALLA, ART.COLOR, ART.GALERIA_IMAGENES, ART.IMAGEN_VERTICAL, ART.IMAGEN_HORIZONTAL, ART.IMAGEN, ART.ESPECIFICACIONES, ART.VISTAS , ROUND((pre.PRECIO*1.13),2) AS PRECIO , ex.CANT_DISPONIBLE FROM bellmart.ARTICULO AS ART ,bellmart.ARTICULO_PRECIO pre ,bellmart.EXISTENCIA_BODEGA ex WHERE VER_TIENDA=true and pre.ARTICULO=ART.ARTICULO and ex.ARTICULO=ART.ARTICULO and ART.ARTICULO =(N'00694') and ex.BODEGA=(N'001') and ex.ARTICULO=ART.ARTICULO and pre.NIVEL_PRECIO=(N'PRECIO_LINEA') and pre.ARTICULO=art.ARTICULO",
+    parameters: undefined
+  },
+  original: RequestError: Invalid column name 'true'.
+      at RequestTokenHandler.onErrorMessage (C:\Dev\bellmart\ApiJs\node_modules\tedious\lib\token\handler.js:368:21)
+      at Readable.<anonymous> (C:\Dev\bellmart\ApiJs\node_modules\tedious\lib\token\token-stream-parser.js:26:33)
+      at Readable.emit (node:events:513:28)
+      at addChunk (node:internal/streams/readable:324:12)
+      at readableAddChunk (node:internal/streams/readable:297:9)
+      at Readable.push (node:internal/streams/readable:234:10)
+      at next (node:internal/streams/from:98:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+    code: 'EREQUEST',
+    number: 207,
+    state: 1,
+    class: 16,
+    serverName: 'DESKTOP-FBFPD01\\SQLSERVER',
+    procName: '',
+    lineNumber: 1,
+    sql: "SELECT ART.ARTICULO, ART.DESCRIPCION, ART.CLASIFICACION_1, ART.CLASIFICACION_2, ART.CLASIFICACION_3, ART.CLASIFICACION_4, ART.CLASIFICACION_5, ART.CLASIFICACION_6, ART.PESO_NETO,ART.PESO_BRUTO, ART.VOLUMEN,ART.ACTIVO, ART.ESTILO, ART.TALLA, ART.COLOR, ART.GALERIA_IMAGENES, ART.IMAGEN_VERTICAL, ART.IMAGEN_HORIZONTAL, ART.IMAGEN, ART.ESPECIFICACIONES, ART.VISTAS , ROUND((pre.PRECIO*1.13),2) AS PRECIO , ex.CANT_DISPONIBLE FROM bellmart.ARTICULO AS ART ,bellmart.ARTICULO_PRECIO pre ,bellmart.EXISTENCIA_BODEGA ex WHERE VER_TIENDA=true and pre.ARTICULO=ART.ARTICULO and ex.ARTICULO=ART.ARTICULO and ART.ARTICULO =(N'00694') and ex.BODEGA=(N'001') and ex.ARTICULO=ART.ARTICULO and pre.NIVEL_PRECIO=(N'PRECIO_LINEA') and pre.ARTICULO=art.ARTICULO",
+    parameters: undefined
+  },
+  sql: "SELECT ART.ARTICULO, ART.DESCRIPCION, ART.CLASIFICACION_1, ART.CLASIFICACION_2, ART.CLASIFICACION_3, ART.CLASIFICACION_4, ART.CLASIFICACION_5, ART.CLASIFICACION_6, ART.PESO_NETO,ART.PESO_BRUTO, ART.VOLUMEN,ART.ACTIVO, ART.ESTILO, ART.TALLA, ART.COLOR, ART.GALERIA_IMAGENES, ART.IMAGEN_VERTICAL, ART.IMAGEN_HORIZONTAL, ART.IMAGEN, ART.ESPECIFICACIONES, ART.VISTAS , ROUND((pre.PRECIO*1.13),2) AS PRECIO , ex.CANT_DISPONIBLE FROM bellmart.ARTICULO AS ART ,bellmart.ARTICULO_PRECIO pre ,bellmart.EXISTENCIA_BODEGA ex WHERE VER_TIENDA=true and pre.ARTICULO=ART.ARTICULO and ex.ARTICULO=ART.ARTICULO and ART.ARTICULO =(N'00694') and ex.BODEGA=(N'001') and ex.ARTICULO=ART.ARTICULO and pre.NIVEL_PRECIO=(N'PRECIO_LINEA') and pre.ARTICULO=art.ARTICULO",
+  parameters: {}
+}
+Executing (default): SELECT [CLIENTE], [NOMBRE], [CONTRIBUYENTE], [RUBRO1_CLI], [RUBRO2_CLI], [Rol], [Password], [Nivel_Precio], [Direccion], [Telefono1], [E_Mail], [CONFIRN] FROM [bellmart].[CLIENTE] AS [CLIENTE] WHERE [CLIENTE].[E_Mail] = N'carlosrobertovelasquez@gmail.com';

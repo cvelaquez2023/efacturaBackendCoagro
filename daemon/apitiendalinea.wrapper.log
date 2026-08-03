@@ -1,0 +1,16 @@
+2023-10-15 19:55:54 - Starting C:\Program Files\nodejs\node.exe  --harmony C:\Dev\bellmart\ApiJs\node_modules\node-windows\lib\wrapper.js --file C:\Dev\bellmart\ApiJs\app.js --scriptoptions= --log "ApiTiendaLinea wrapper" --grow 0.25 --wait 1 --maxrestarts 3 --abortonerror n --stopparentfirst undefined
+2023-10-15 19:55:55 - Started 29304
+2023-10-15 20:02:13 - Stopping apitiendalinea.exe
+2023-10-15 20:02:13 - ProcessKill 29304
+2023-10-15 20:02:14 - Found child process: 29312 Name: conhost.exe
+2023-10-15 20:02:14 - Found child process: 14928 Name: node.exe
+2023-10-15 20:02:14 - Stopping process 29312
+2023-10-15 20:02:14 - Send SIGINT 29312
+2023-10-15 20:02:14 - SIGINT to 29312 failed - Killing as fallback
+2023-10-15 20:02:14 - Stopping process 14928
+2023-10-15 20:02:14 - Send SIGINT 14928
+2023-10-15 20:02:14 - SIGINT to 14928 failed - Killing as fallback
+2023-10-15 20:02:14 - Stopping process 29304
+2023-10-15 20:02:14 - Send SIGINT 29304
+2023-10-15 20:02:14 - SIGINT to 29304 failed - Killing as fallback
+2023-10-15 20:02:14 - Finished apitiendalinea.exe

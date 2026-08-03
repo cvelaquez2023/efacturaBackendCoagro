@@ -1,0 +1,3 @@
+{
+  "ignore": ["/storage/json/dte01/rechazados/*.json", "README"]
+}

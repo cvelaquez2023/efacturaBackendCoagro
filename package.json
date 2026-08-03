@@ -1,0 +1,46 @@
+{
+  "name": "apijs",
+  "version": "1.0.0",
+  "nodemonConfig": {
+    "ignore": [
+      "store/"
+    ]
+  },
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node ./app.js",
+    "dev": "nodemon  ./app.js --ignore '../..storage/*'",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.1.4",
+    "express": "^4.18.2",
+    "express-validator": "^7.0.1",
+    "fs": "^0.0.1-security",
+    "fs-extra": "^11.2.0",
+    "handlebars": "^4.7.8",
+    "https": "^1.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "moment": "^2.29.4",
+    "multer": "^1.4.5-lts.1",
+    "node-fetch": "^3.3.2",
+    "node-windows": "^1.0.0-beta.8",
+    "nodemailer": "^6.9.4",
+    "nodemon": "^3.0.2",
+    "pdf-creator-node": "^2.3.5",
+    "pdfkit": "^0.14.0",
+    "pdfkit-construct": "^1.2.3",
+    "pdfkit-table": "^0.1.99",
+    "puppeteer": "^21.11.0",
+    "qrcode": "^1.5.3",
+    "sequelize": "^6.32.0",
+    "tedious": "^16.1.0"
+  }
+}

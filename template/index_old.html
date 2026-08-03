@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--Boostra-->
+
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css"
+      integrity="sha384-xOolHFLEh07PJGoPkLv1IbcEPTNtaed2xpHsD9ESMhqIYd0nLMwNLD69Npy4HI+N"
+      crossorigin="anonymous"
+    />
+    <!--Font Awaesome-->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+      integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+    <title>CCF V1.001</title>
+  </head>
+  <body>
+    <style>
+    @import url("https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&display=swap");
+      body {
+    margin: 0;
+    padding: 0;
+    font-size: 16px;
+    font-weight: 300;
+    width: 100%;
+   
+    font-family: 'Roboto Condensed', sans-serif;
+  }
+  h2, h4, p {
+    margin: 0;
+}
+
+.page {
+    background: #ffffff;
+    display: block;
+    
+    position: relative;
+    box-shadow: 0 0 0.5cm rgba(0, 0, 0, 0.5)
+}
+
+.page[size="A4"] {
+    width: 22cm;
+    height: 28.7cm;
+    overflow-x: hidden;
+}
+
+/*Top Section*/
+.top-section {
+    color: #fff;
+    padding: 10px;
+    height: 195px;
+}
+
+.top-section h2 {
+    font-size: 30px;
+    margin-bottom: 10px;
+    font-weight: 400;
+}
+
+
+.top-section .address {
+    width: 25%;
+    height: 100%;
+    float: left;
+
+}
+
+.top-section .contact {
+    width: 50%;
+    height: 100%;
+    float: left;
+    text-align: left;
+    border-radius: 10px;
+    border: 2px solid #810635;
+    padding-bottom: 2px;
+}
+
+
+.contact .contact-content {
+    width: 100%;
+    float: right;
+    padding: 10px;
+
+}
+
+
+.contact .contact-content div, span {
+    font-size: 12px;
+}
+
+.titulo,
+.subtitulo {
+    width: 100%;
+    text-align: center;
+    font-weight: bold;
+    color: black;
+}
+.encaDetalle {
+  color: black;
+  font-size: 9px;
+}
+
+
+
+
+
+.qr {
+    width: 25%;
+    float: right;
+    height: 50px;
+}
+
+.contenedorQR {
+
+    justify-content: center;
+    padding: 0;
+    height: 50px;
+}
+
+.contenedorQR svg {
+    margin-left: 14px;
+    justify-content: center;
+    width: 165px;
+    height: 160px;
+
+}
+
+.logo {
+    justify-content: center;
+    margin-left: 10px;
+    width: 165px;
+    height: 150px;
+    border-radius: 10px;
+}
+
+.billing-to {
+    padding: 8px;
+    margin-top: 10px;
+
+
+}
+
+.emisor {
+    margin-bottom: 5px;
+}
+
+.tabla1 {
+    width: 49.5%;
+    float: left;
+    border-collapse: collapse;
+    font-size: 11px;
+    text-align: left;
+    border: 2px solid #810635;
+    border-radius: 10px;
+
+}
+
+.tabla2 {
+    width: 49.5%;
+    float: right;
+    border-collapse: collapse;
+    font-size: 11px;
+    text-align: left;
+    margin-bottom: 8px;
+    border: 2px solid #810635;
+    border-radius: 10px;
+}
+
+.title {
+    width: 100%;
+    text-align: center !important;
+    align-items: center;
+    font-weight: 700;
+}
+
+td, th {
+    padding-left: 4px;
+    border: 1px solid #810635;
+}
+
+/* Tabla de item*/
+
+.tablaItem {
+    margin-left: 17px;
+    margin-right: 17px;
+    margin-top: 5px;
+}
+
+.tablaItem table {
+    width: 100%;
+}
+
+.tablaItems th {
+    text-align: center;
+    padding: 5px;
+    font-size: 9px;
+    border-collapse: collapse;
+    font-weight: bold;
+}
+
+.tablaItems td {
+    text-align: center;
+    padding: 5px;
+    font-size: 9px;
+    border-collapse: collapse;
+    font-weight: 400;
+}
+
+.tablaItems tr:first-child {
+    color:black;
+}
+
+.tablaResumen {
+  margin: 10px;
+  padding: 8px;
+  margin-top: 10px;
+  width: 98%;
+}
+
+.resumenIzquiero{
+  width: 49.5%;
+    float: left;
+    border-collapse: collapse;
+    font-size: 11px;
+    text-align: left;
+    
+}
+.resumenDerecho{
+  width: 49.5%;
+    float: right;
+    border-collapse: collapse;
+    font-size: 11px;
+    text-align: left;
+    margin-bottom: 8px;
+    border: 2px solid #810635;
+    border-radius: 10px;
+}
+
+
+.monto {
+    text-align: right;
+
+}
+.montoM {
+    text-align: right;
+    font-size: 7px;
+}
+.totalLetras {
+  font-size: 10px;
+    width: 98%;
+    float: left;
+    margin-top: 5px;
+    margin-left: 5px;
+    padding: 10px;
+   
+    color: black;
+    border: 2px solid #810635;
+    border-radius: 10px;
+}
+.apendice {
+  font-size: 10px;
+width: 98%;
+float: left;
+margin-top: 5px;
+margin-left: 1px;
+padding: 10px;
+color: black;
+border: 2px solid #810635;
+border-radius: 10px;
+}
+.tablaresu{
+  font-size: 10px;
+}
+.tituloResumen{
+  text-align: center;
+}
+    </style>
+    <div class="page" size="A4">
+      <div class="top-section">
+        <div class="address">
+          <div class="address-content">
+            <img class="logo" src="https://static.wixstatic.com/media/d50bc7_4a5c36a4a7c842bd8f4e6babc4afab46~mv2.jpg/v1/crop/x_16,y_9,w_239,h_143/fill/w_209,h_200,al_c,lg_1,q_80,enc_auto/d50bc7_4a5c36a4a7c842bd8f4e6babc4afab46~mv2.jpg" alt="">
+          </div>
+        </div>
+        <div class="contact">
+          <div class="contact-content">
+            <div class="titulo" >
+              <span>DOCUMENTO TRIBUTARIO ELECTRONICO</span>
+            </div>
+            <div class="subtitulo">
+              <span>{{products.tipoDoc}}</span>
+            </div>
+            <div class="encaDetalle">
+              Código de Generacion:
+              <span class="encaDetalle">{{products.codigoGeneracion}}</span>
+            </div>
+            <div class="encaDetalle">
+              Número de Control:
+              <span class="encaDetalle">{{products.numeroControl}}</span>
+            </div>
+            <div class="encaDetalle">
+              Sello de recepción:
+              <span class="encaDetalle">{{products.selloRecibido}}</span>
+            </div>
+            <div class="encaDetalle">
+              Módelo de Facturacion:
+              <span class="encaDetalle">Modelo de Facturacion previo</span>
+            </div>
+            <div class="encaDetalle">
+              Tipo de Transmisión:
+              <span class="encaDetalle">Transmisión normal</span>
+            </div>
+            <div class="encaDetalle">
+              Fecha y Hora de Generación:
+              <span class="encaDetalle">{{products.fechaHoraGeneracion}}</span>
+            </div>
+          </div>
+        </div>
+        <div class="qr">
+
+         <div id="contenedorQR" class="contenedorQR" >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 53 53" shape-rendering="crispEdges"><path fill="#ffffff" d="M0 0h53v53H0z"/><path stroke="#000000" d="M4 4.5h7m1 0h1m1 0h1m4 0h2m2 0h1m1 0h1m3 0h1m3 0h2m1 0h1m3 0h1m1 0h7M4 5.5h1m5 0h1m1 0h3m1 0h8m7 0h5m3 0h1m2 0h1m5 0h1M4 6.5h1m1 0h3m1 0h1m2 0h2m3 0h4m2 0h1m1 0h3m1 0h1m2 0h2m1 0h1m2 0h1m2 0h1m1 0h3m1 0h1M4 7.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m2 0h1m2 0h1m1 0h2m2 0h1m2 0h1m2 0h1m2 0h2m1 0h1m1 0h3m1 0h1M4 8.5h1m1 0h3m1 0h1m3 0h2m1 0h2m2 0h2m1 0h6m1 0h1m3 0h1m1 0h4m1 0h1m1 0h3m1 0h1M4 9.5h1m5 0h1m2 0h4m6 0h2m3 0h2m1 0h2m1 0h1m2 0h1m4 0h1m5 0h1M4 10.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M12 11.5h4m1 0h1m2 0h1m3 0h1m3 0h1m1 0h3m3 0h1m2 0h1M4 12.5h1m1 0h2m1 0h3m2 0h2m1 0h4m3 0h10m1 0h5m2 0h1m2 0h1m1 0h2M5 13.5h2m2 0h1m1 0h1m1 0h1m3 0h1m2 0h4m2 0h1m1 0h2m6 0h1m3 0h1m3 0h2m1 0h2M5 14.5h2m1 0h3m2 0h3m3 0h1m2 0h1m1 0h2m2 0h1m2 0h1m1 0h2m1 0h1m1 0h2m1 0h1m3 0h4M4 15.5h4m1 0h1m1 0h2m1 0h1m5 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m5 0h2m1 0h1M5 16.5h1m1 0h1m1 0h2m1 0h1m2 0h1m1 0h1m3 0h2m1 0h1m2 0h1m2 0h2m1 0h2m2 0h2m5 0h2m2 0h1M4 17.5h2m1 0h1m3 0h1m1 0h2m1 0h3m1 0h4m3 0h1m1 0h2m2 0h5m3 0h2m3 0h1m1 0h1M6 18.5h1m1 0h1m1 0h1m1 0h1m1 0h1m3 0h1m1 0h2m1 0h1m1 0h2m3 0h1m1 0h1m1 0h2m3 0h1m1 0h2m1 0h1m1 0h1m1 0h1M11 19.5h1m1 0h2m1 0h5m1 0h2m1 0h1m3 0h1m3 0h2m1 0h5m2 0h2m1 0h1M5 20.5h1m1 0h1m2 0h1m2 0h1m2 0h1m1 0h3m3 0h2m2 0h1m4 0h2m1 0h7m3 0h2M4 21.5h2m1 0h2m4 0h1m1 0h2m1 0h1m4 0h2m1 0h4m3 0h1m1 0h3m1 0h1m1 0h1m3 0h4M4 22.5h2m1 0h2m1 0h1m2 0h1m4 0h1m1 0h1m3 0h3m1 0h1m2 0h1m3 0h2m1 0h2m2 0h2m2 0h2M4 23.5h1m3 0h2m1 0h2m1 0h1m2 0h2m2 0h1m1 0h2m5 0h1m1 0h2m1 0h2m1 0h1m1 0h1m1 0h3m1 0h3M4 24.5h1m1 0h1m1 0h6m5 0h1m4 0h5m2 0h3m1 0h1m3 0h6M5 25.5h1m1 0h2m3 0h1m2 0h1m3 0h6m3 0h1m4 0h2m5 0h1m3 0h3m1 0h1M5 26.5h2m1 0h1m1 0h1m1 0h8m2 0h1m1 0h1m1 0h1m1 0h3m1 0h5m3 0h1m1 0h1m1 0h2m1 0h2M4 27.5h1m1 0h1m1 0h1m3 0h1m2 0h1m2 0h1m3 0h3m3 0h2m1 0h1m2 0h2m1 0h4m3 0h2m2 0h1M5 28.5h9m3 0h2m2 0h1m1 0h7m4 0h2m1 0h1m2 0h6m1 0h2M4 29.5h4m5 0h1m1 0h1m2 0h4m1 0h1m2 0h1m1 0h1m1 0h1m2 0h2m1 0h2m5 0h1m1 0h1M6 30.5h1m1 0h1m1 0h1m1 0h4m1 0h1m1 0h2m1 0h3m1 0h1m1 0h7m1 0h1m2 0h1m1 0h2m1 0h3M4 31.5h3m2 0h1m2 0h1m2 0h1m1 0h4m2 0h1m3 0h3m1 0h2m3 0h1m1 0h2m4 0h3M4 32.5h1m4 0h2m1 0h2m1 0h1m2 0h2m1 0h2m5 0h1m1 0h1m1 0h2m1 0h2m3 0h1m2 0h2m1 0h1m1 0h1M5 33.5h1m1 0h1m1 0h1m2 0h1m1 0h2m4 0h1m2 0h1m3 0h1m4 0h2m2 0h3m2 0h7M5 34.5h2m1 0h7m1 0h4m1 0h1m2 0h2m1 0h2m1 0h2m1 0h2m2 0h3m3 0h1m1 0h3M7 35.5h2m2 0h1m3 0h3m3 0h1m2 0h2m1 0h1m4 0h2m6 0h1m4 0h1m2 0h1M4 36.5h1m3 0h5m4 0h1m2 0h2m1 0h5m3 0h1m1 0h1m3 0h1m3 0h1m1 0h2m1 0h1M4 37.5h1m3 0h1m4 0h1m1 0h2m4 0h1m3 0h1m2 0h2m2 0h4m4 0h2m2 0h1m3 0h1M8 38.5h1m1 0h1m4 0h1m3 0h1m1 0h2m2 0h2m3 0h2m1 0h2m2 0h1m1 0h1m1 0h2m1 0h5M5 39.5h4m2 0h2m1 0h1m2 0h2m4 0h1m3 0h2m1 0h1m2 0h2m1 0h1m1 0h2m3 0h4m1 0h1M4 40.5h1m2 0h2m1 0h7m2 0h2m1 0h7m1 0h1m2 0h2m1 0h2m2 0h5m1 0h2M12 41.5h1m3 0h4m1 0h2m1 0h1m3 0h2m2 0h1m3 0h1m1 0h1m1 0h1m3 0h1M4 42.5h7m1 0h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1m1 0h2m3 0h2m1 0h1m1 0h1M4 43.5h1m5 0h1m1 0h1m2 0h2m5 0h3m3 0h3m1 0h3m3 0h3m3 0h5M4 44.5h1m1 0h3m1 0h1m2 0h1m1 0h2m1 0h3m1 0h1m1 0h5m2 0h1m3 0h3m2 0h5m1 0h1m1 0h1M4 45.5h1m1 0h3m1 0h1m1 0h5m1 0h2m1 0h5m1 0h1m3 0h1m1 0h3m1 0h3m1 0h2m2 0h1m1 0h1M4 46.5h1m1 0h3m1 0h1m1 0h1m4 0h2m1 0h4m1 0h1m2 0h1m1 0h2m3 0h1m1 0h3m3 0h1m1 0h3M4 47.5h1m5 0h1m5 0h1m1 0h2m2 0h2m1 0h2m1 0h3m7 0h3m2 0h1m4 0h1M4 48.5h7m1 0h1m3 0h4m1 0h1m10 0h1m1 0h1m2 0h2m1 0h3m1 0h1m1 0h1"/></svg>
+
+         </div>
+         
+        </div>
+      </div>
+      <div class="billing-to">
+              <div class="tabla1">
+                <div class="title"><span >EMISOR</span></div>
+                <table>
+                  <tr>
+                    <td>Nombre o razon social :</td>
+                    <td>DROGUERIA UNIVERSAL, S.A. DE C.V.</td>
+                    
+                  </tr>
+                  <tr>
+                    <td>NIT:</td>
+                    <td>06140110911040</td>
+                  </tr>
+                  <tr>
+                    <td>NRC:</td>
+                    <td>291048</td>
+                  </tr>
+                  <tr>
+                    <td style="width: 35%;">Actividad Economica:</td>
+                    <td>Venta de productos farmaceuticos y medicinales</td>
+                  </tr>
+                  <tr>
+                    <td>Direccion:</td>
+                    <td>ALAMEDA ROOSEVELT COL FLOR BLANCA N 
+                      2736</td>
+                  </tr>
+                  <tr>
+                    <td>Numero Telefono:</td>
+                    <td>25351000</td>
+                  </tr>
+                  <tr>
+                    <td>Correo Eletronico:</td>
+                    <td>ducontabilidad@gmail.com</td>
+                  </tr>
+                  <tr>
+                    <td>Nombre Comercial:</td>
+                    <td>DROGUERIA UNIVERSAL, S.A. DE C.V</td>
+                  </tr>      
+                </table>
+              </div>
+              <div class="tabla2">
+                <div class="title"><span >RECEPTOR</span></div>
+                
+                <table>
+                  <tr>
+                    <td>Nombre o razon social :</td>
+                    <td>{{products.nombre}}</td>
+                    
+                  </tr>
+                  <tr>
+                    <td>NIT:</td>
+                    <td>{{products.nit}}</td>
+                  </tr>
+                  <tr>
+                    <td>NRC:</td>
+                    <td>{{products.nrc}}</td>
+                  </tr>
+                  <tr>
+                    <td style="width: 35%;">Actividad Economica:</td>
+                    <td>{{products.descActividad}}</td>
+                  </tr>
+                  <tr>
+                    <td>Direccion:</td>
+                    <td>{{products.direccion_compl}}</td>
+                  </tr>
+                  <tr>
+                    <td>Numero Telefono:</td>
+                    <td>{{products.telefono}}</td>
+                  </tr>
+                  <tr>
+                    <td>Correo Eletronico:</td>
+                    <td>{{products.correo}}</td>
+                  </tr>
+                  <tr>
+                    <td>Nombre Comercial:</td>
+                    <td>{{products.nombreComercial}}</td>
+                  </tr>      
+                </table>
+              </div>
+    </div>
+    <div class="tablaItem">
+      <table class="tablaItems">
+        <thead>
+        <tr>
+          <th>No</th>
+          <th>Codigo</th>
+          <th>Cant.</th>
+          <th>Unidad</th>
+          <th>Descripción</th>
+          <th>Precio Unitario</th>
+          <th>Descuento Global</th>
+          <th>Ventas No Sujetas</th>
+          <th>Ventas Exentas</th>
+          <th>Ventas Gravadas</th>
+        </tr>
+      </thead>
+      <tbody>
+
+      
+        {{#each products.prodlist }}
+        <tr>
+          <td>{{this.numItem}}</td>
+          <td>{{this.codigo}}</td>
+          <td>{{this.cantidad}}</td>
+          <td>Unidad</td>
+          <td style="text-align: left;" >{{this.descripcion}}</td>
+          <td>${{this.precioUni}}</td>
+          <td>${{this.montoDescu}}</td>
+          <td>${{this.ventaNoSuj}}</td>
+          <td>${{this.ventaExenta}}</td>
+          <td>${{this.ventaGravada}}</td>
+        </tr>
+        {{/each }}
+      </tbody>
+      </table>
+    </div>
+    <div class="tablaResumen">
+      <div class="resumenIzquiero">
+        <div class="totalLetras">
+          <div> Valor en Letras : <span> {{products.totalLetras}} </span></div>
+          <div> Condicion de la Operación : <span>{{products.descripcion}} </span></div>
+        </div>
+        <div class="apendice">
+          <div> Vendedor : <span> {{products.vendedor}}-{{products.nombreV}} </span></div>
+          <div> Observacion : <span>{{products.observaciones}} </span></div>
+          <div> Cliente : <span>{{products.cliente}} </span></div>
+          <div> Pedido : <span>{{products.pedido}} </span></div>
+          <div> Direccion : <span>{{products.apDirecion}} </span></div>
+        </div>
+      </div>
+      <div class="resumenDerecho">
+        <div class="tituloResumen"><span>SUMA TOTAL DE OPERACIONES</span></div>
+          <div class="tablaresu">
+            
+            <table  >
+           <tbody  >
+            <tr>
+              <td>Ventas no Sujetas:</td>
+              <td class="monto" >${{products.totalNoSuj}}</td>
+              
+            </tr>
+            <tr>
+              <td>Ventas Exentas:</td>
+              <td class="monto" >${{products.totalExenta}}</td>
+              
+            </tr>
+            <tr>
+              <td>Total Gravada :</td>
+              <td class="monto">${{products.totalGravada}}</td>
+            </tr>
+            <tr>
+              <td>Monto Global de Descuento,Bonificaciones,Rebajas y otros a Vnetas gravada:</td>
+              <td class="monto">${{products.totalDescu}}</td>
+            </tr>
+            <tr>
+              <td >Sumatoria de Ventas:</td>
+              <td class="monto">${{products.subTotal}}</td>
+            </tr>
+            <tr>
+              <td>Impuesto al Valor agregado 13%:</td>
+              <td class="monto">${{products.valor}}</td>
+            </tr>
+            <tr>
+              <td>Sub-Total</td>
+              <td class="monto">${{products.subTotalVentas}}</td>
+            </tr>
+            <tr>
+              <td>IVA Percibido:</td>
+              <td class="monto">${{products.ivaPerci1}}</td>
+            </tr>
+            <tr>
+              <td>IVA Retenido:</td>
+              <td class="monto">${{products.ivaRete1}}</td>
+            </tr>      
+            <tr>
+              <td>Retencion Renta:</td>
+              <td class="monto">${{products.reteRenta}}</td>
+            </tr>      
+            <tr>
+              <td>Monto Total de la Operacion:</td>
+              <td class="monto">${{products.montoTotalOperacion}}</td>
+            </tr>      
+            <tr>
+              <td>Total a Pagar:</td>
+              <td class="monto">${{products.totalPagar}}</td>
+            </tr>     
+          </tbody> 
+          
+            </table>
+  
+        </div>
+      </div>
+    </div>
+  </body>
+  
+</html>

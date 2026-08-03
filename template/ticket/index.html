@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Arial', 'Helvetica Neue', sans-serif;
+      font-size: 6px;
+      width: 80mm;
+      color: #000;
+      background: #fff;
+      line-height: 1.05;
+    }
+    .ticket {
+      width: 80mm;
+      padding: 2mm 3mm;
+    }
+
+    /* QR + Logo */
+    .qr-logo table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .qr-logo td {
+      vertical-align: top;
+    }
+    .qr-logo .qr { width: 68px; height: 68px; }
+    .qr-logo .qr svg { width: 68px; height: 68px; }
+    .qr-logo .logo-wrap { text-align: right; }
+    .qr-logo .logo-wrap img { max-width: 88px; max-height: 88px; object-fit: contain; }
+
+    /* Titulos */
+    .title-dte {
+      text-align: center;
+      font-size: 12px;
+      margin: 4px 0 1px 0;
+    }
+    .subtitle-dte {
+      text-align: center;
+      font-size: 10px;
+      font-weight: bold;
+      color: #0070c0;
+      margin-bottom: 2px;
+    }
+
+    /* Separador centrado entre guiones */
+    .separator {
+      font-size: 8px;
+      font-weight: bold;
+      color: #000;
+      text-align: center;
+      margin: 6px 0 2px 0;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    /* Campos label:value */
+    .field {
+      font-size: 8px;
+      margin: 1px 0;
+    }
+    .field .label {
+      font-weight: bold;
+    }
+
+    /* Fila de dos columnas */
+    .row2 {
+      font-size: 8px;
+      margin: 1px 0;
+    }
+    .row2 table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .row2 td {
+      padding: 0.5px 0;
+    }
+
+    /* Detalle productos */
+    .detail-header {
+      font-size: 8px;
+      font-weight: bold;
+      margin: 2px 0 1px 0;
+    }
+    .detail-header table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .detail-header td {
+      padding: 0.5px 0;
+    }
+    .detail-header .col-cant { width: 35px; }
+    .detail-header .col-desc { }
+
+    .detail-item {
+      margin: 0 0 0 0;
+    }
+    .detail-item .line1 {
+      font-size: 6px;
+      font-weight: bold;
+    }
+    .detail-item .line1 table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .detail-item .line1 td {
+      padding: 0.5px 0;
+    }
+    .detail-item .line1 .col-cant { width: 35px; }
+    .detail-item .line1 .col-desc { }
+
+    .detail-item .line2,
+    .detail-item .line3 {
+      font-size: 6px;
+    }
+    .detail-item .line2 table,
+    .detail-item .line3 table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .detail-item .line2 td,
+    .detail-item .line3 td {
+      padding: 0.5px 0;
+    }
+    .detail-item .line2 .col-right,
+    .detail-item .line3 .col-right {
+      text-align: right;
+      padding-right: 4px;
+    }
+
+    .detail-item .line4 {
+      font-size: 6px;
+      color: #333;
+    }
+
+    .detail-sep {
+      text-align: center;
+      font-size: 5.4px;
+      color: #777;
+      margin: 1px 0 2px 0;
+    }
+
+    /* Resumen - money rows */
+    .money-row {
+      font-size: 8px;
+      margin: 1px 0;
+    }
+    .money-row table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .money-row td {
+      padding: 0.5px 0;
+      vertical-align: top;
+    }
+    .money-row .label-col { }
+    .money-row .value-col {
+      text-align: right;
+      white-space: nowrap;
+      padding-left: 8px;
+    }
+
+    /* Total en letras */
+    .total-letras {
+      font-size: 6px;
+      font-weight: bold;
+      margin: 4px 0 0 0;
+    }
+
+    /* Info pago */
+    .pago-line {
+      font-size: 6px;
+      margin: 2px 0 0 0;
+    }
+
+    /* Notas */
+    .notas {
+      font-size: 6px;
+      line-height: 1.08;
+      margin: 2px 0;
+    }
+    .notas .nota-item {
+      margin: 1px 0;
+    }
+
+    /* Pagare */
+    .pagare {
+      font-size: 6px;
+      line-height: 1.12;
+      margin: 2px 0 0 0;
+      text-align: justify;
+    }
+    .pagare p {
+      margin: 2px 0;
+    }
+
+    /* Firmas */
+    .firmas {
+      margin: 14px 0 6px 0;
+    }
+    .firmas table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .firmas td {
+      width: 50%;
+      text-align: center;
+      vertical-align: top;
+      padding: 0 6px;
+    }
+    .firma-box .firma-cuadro {
+      border: 1px solid #666;
+      height: 40px;
+    }
+    .firma-box .firma-label {
+      font-size: 6px;
+      margin: 2px 0 0 0;
+    }
+
+    .bold { font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="ticket">
+
+    <!-- QR + Logo -->
+    <div class="qr-logo">
+      <table><tr>
+        <td><div class="qr">[QR CODE]</div></td>
+        <td style="text-align:right"><div class="logo-wrap"><img src="{{products.logoUrl}}" alt="Logo" /></div></td>
+      </tr></table>
+    </div>
+
+    <div class="title-dte">DOCUMENTO TRIBUTARIO ELECTRÓNICO</div>
+    <div class="subtitle-dte">{{products.tipoDoc}}</div>
+
+    <!-- DATOS DEL EMISOR -->
+    <div class="separator">-------------------------------- DATOS DEL EMISOR --------------------------------</div>
+    <div class="field"><span class="label">Emisor: </span>{{products.nombreEmisor}}</div>
+    <div class="row2"><table><tr><td><span class="bold">NIT: </span>{{products.nitEmisor}}</td><td><span class="bold">NRC: </span>{{products.nrcEmisor}}</td></tr></table></div>
+    <div class="field"><span class="label">Actividad Económica: </span>{{products.actividadEmisor}}</div>
+    <div class="field"><span class="label">Dirección: </span>{{products.direccionEmisor}}</div>
+    <div class="row2"><table><tr><td><span class="bold">Telefono: </span>{{products.telefonoEmisor}}</td><td><span class="bold">Correo: </span>{{products.correoEmisor}}</td></tr></table></div>
+
+    <!-- DATOS DE FACTURACIÓN -->
+    <div class="separator">--------------------------- DATOS DE FACTURACIÓN ---------------------------</div>
+    <div class="field"><span class="label">Código de Generación: </span>{{products.codigoGeneracion}}</div>
+    <div class="field"><span class="label">Sello de Recepción: </span>{{products.selloRecibido}}</div>
+    <div class="field"><span class="label">Número de Control: </span>{{products.numeroControl}}</div>
+    <div class="field"><span class="label">Fecha y Hora de Generación: </span>{{products.fechaHoraGeneracion}}</div>
+
+    <!-- DATOS DEL RECEPTOR -->
+    <div class="separator">------------------------------ DATOS DEL RECEPTOR ------------------------------</div>
+    <div class="field"><span class="label">Nombre o Razón Social: </span>{{products.nombreReceptor}}</div>
+    <div class="field"><span class="label">Nombre Comercial: </span>{{products.nombreComercialReceptor}}</div>
+    <div class="row2"><table><tr><td><span class="bold">NIT: </span>{{products.nitReceptor}}</td><td><span class="bold">NRC: </span>{{products.nrcReceptor}}</td></tr></table></div>
+    <div class="field"><span class="label">Giro: </span>{{products.descActividadReceptor}}</div>
+    <div class="field"><span class="label">Dirección: </span>{{products.direccionReceptor}}</div>
+    <div class="field"><span class="label">Teléfono: </span>{{products.telefonoReceptor}}</div>
+    <div class="field"><span class="label">Correo: </span>{{products.correoReceptor}}</div>
+
+    <!-- DETALLE DE PRODUCTOS -->
+    <div class="separator">--------------------------- DETALLE DE PRODUCTOS ---------------------------</div>
+    <div class="detail-header"><table><tr>
+      <td class="col-cant">CANT.</td>
+      <td class="col-desc">DESCRIPCION</td>
+    </tr></table></div>
+    {{#each products.prodlist}}
+    <div class="detail-item">
+      <div class="line1"><table><tr>
+        <td class="col-cant">{{this.cantidad}}</td>
+        <td class="col-desc">{{this.descripcion}}</td>
+      </tr></table></div>
+      <div class="line2"><table><tr>
+        <td><span class="bold">P/UNI: </span>{{this.precioUni}}</td>
+        <td class="col-right"><span class="bold">DESC: </span>{{this.porDesc}}%</td>
+      </tr></table></div>
+      <div class="line3"><table><tr>
+        <td><span class="bold">P/DESC: </span>{{this.precioDescuento}}</td>
+        <td class="col-right"><span class="bold">SUB TOTAL: </span>{{this.ventaGravada}}</td>
+      </tr></table></div>
+      <div class="line4">
+        <span class="bold">Bod: </span>{{this.bodega}}
+        <span class="bold">Lot: </span>{{this.lote}}
+        <span class="bold">F. Vence: </span>{{this.fechaVence}}
+      </div>
+      <div class="detail-sep">----------------------------------------------------</div>
+    </div>
+    {{/each}}
+
+    <!-- RESUMEN -->
+    <div class="separator">-------------------------------- RESUMEN --------------------------------</div>
+    <div class="money-row"><table><tr><td class="label-col">Ventas No Sujetas</td><td class="value-col">{{products.totalNoSuj}}</td></tr></table></div>
+    <div class="money-row"><table><tr><td class="label-col">Ventas Exentas</td><td class="value-col">{{products.totalExenta}}</td></tr></table></div>
+    <div class="money-row"><table><tr><td class="label-col">Ventas Gravadas</td><td class="value-col">{{products.totalGravada}}</td></tr></table></div>
+    <div class="money-row"><table><tr><td class="label-col">Sumatoria Ventas</td><td class="value-col">{{products.subTotalVentas}}</td></tr></table></div>
+    <div class="money-row"><table><tr><td class="label-col">Descuentos</td><td class="value-col">{{products.totalDescu}}</td></tr></table></div>
+    <div class="money-row"><table><tr><td class="label-col">Sub Total</td><td class="value-col">{{products.subTotal}}</td></tr></table></div>
+    <div class="money-row"><table><tr><td class="label-col">IVA 13%</td><td class="value-col">{{products.valorIva}}</td></tr></table></div>
+    <div class="money-row"><table><tr><td class="label-col">IVA Percibido</td><td class="value-col">{{products.ivaPerci1}}</td></tr></table></div>
+    <div class="money-row"><table><tr><td class="label-col">IVA Retenido</td><td class="value-col">{{products.ivaRete1}}</td></tr></table></div>
+    <div class="money-row"><table><tr><td class="label-col">Retención Renta</td><td class="value-col">{{products.reteRenta}}</td></tr></table></div>
+    <div class="money-row"><table><tr><td class="label-col">Monto Total Operación</td><td class="value-col">{{products.montoTotalOperacion}}</td></tr></table></div>
+    <div class="money-row"><table><tr><td class="label-col"><strong>TOTAL A PAGAR</strong></td><td class="value-col"><strong>{{products.totalPagar}}</strong></td></tr></table></div>
+
+    <div class="total-letras">TOTAL EN LETRAS: {{products.totalLetras}}</div>
+    <div class="pago-line">FORMA DE PAGO: {{products.formaPago}}</div>
+    <div class="pago-line">DIAS DE CREDITO ASIGNADOS: {{products.diasCredito}}</div>
+    <div class="pago-line">CODIGO VENDEDOR: {{products.vendedor}}</div>
+
+    <!-- NOTAS -->
+    <div class="separator">---------------------------------- NOTAS ----------------------------------</div>
+    <div class="notas">
+      <div class="nota-item">1. No se aceptan devoluciones después de 15 días de recepción del pedido.</div>
+      <div class="nota-item">2. Para la devolución, los productos deberán encontrarse completos, sellados y sin alteraciones.</div>
+      <div class="nota-item">3. Pagos con cheque, favor elaborar a nombre de Comercial Agropecuaria, S.A. de C.V.</div>
+      <div class="nota-item">4. Todo cheque rechazado, generará un cargo administrativo de $25.00 más IVA.</div>
+    </div>
+
+    {{#if products.esCredito}}
+    <!-- PAGARÉ -->
+    <div class="separator">--------------------------- PAGARÉ SIN PROTESTO ---------------------------</div>
+    <div class="pagare">
+      <p>Por medio del presente PAGARÉ yo, {{products.nombreReceptor}}, con DUI ó NIT {{products.nitReceptor}}, me obligo a pagar incondicionalmente, a la orden de Comercial Agropecuaria, Sociedad Anónima de Capital Variable, que se abrevia COAGRO, S.A. DE C.V., la cantidad de: {{products.montoTotalOperacion}} dólares de los Estados Unidos de América el día estipulado según Fecha de Pago en el presente documento {{products.fechaDocVence}} a una tasa de interés mensual del 1.5%. Tasa se aplicará a partir del vencimiento del plazo de crédito otorgado.</p>
+      <p>El DEUDOR pagará todas las sumas aquí establecidas incluyendo los intereses moratorios generados sin necesidad de requerimiento previo.</p>
+      <p>El presente pagaré se suscribe en la Ciudad de San Salvador, San Salvador Centro, el {{products.fechaDocumento}}.</p>
+    </div>
+    {{/if}}
+
+    <!-- FIRMAS -->
+    <div class="firmas">
+      <table><tr>
+        <td>
+          <div class="firma-box">
+            <div class="firma-cuadro"></div>
+            <div class="firma-label">FIRMA DE RECIBIDO</div>
+          </div>
+        </td>
+        <td>
+          <div class="firma-box">
+            <div class="firma-cuadro"></div>
+            <div class="firma-label">SELLO</div>
+          </div>
+        </td>
+      </tr></table>
+    </div>
+
+  </div>
+</body>
+</html>
