@@ -38,6 +38,10 @@ const models = {
   responsable: require("./Responsable"),
   globalesRuteoModel: require("./fr/GlobalesRuteo"),
   visitaModel: require("./fr/Visita"),
+  grupoArticuloRtModel: require("./fr/GrupoArticuloRt"),
+  handheldRtModel: require("./fr/HandheldRt"),
+  rutaRtModel: require("./fr/RutaRt"),
+  clienteRtModel: require("./fr/ClienteRt"),
 };
 
 module.exports = models;
