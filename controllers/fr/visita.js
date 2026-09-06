@@ -1,14 +1,22 @@
 const { visitaModel } = require("../../models");
+const { getPaginacion, respuestaPaginada } = require("../../utils/paginacion");
 
 const getVisitas = async (req, res) => {
   try {
     const { ruta, cliente } = req.query;
+    const { page, limit, offset } = getPaginacion(req.query);
     const where = {};
     if (ruta) where.RUTA = ruta;
     if (cliente) where.CLIENTE = cliente;
 
-    const data = await visitaModel.findAll({ where, raw: true });
-    res.send({ result: data, success: true });
+    const data = await visitaModel.findAndCountAll({
+      where,
+      limit,
+      offset,
+      order: [["INICIO", "DESC"]],
+      raw: true,
+    });
+    res.send(respuestaPaginada(data, { page, limit }));
   } catch (error) {
     console.log(error);
     res.send({

@@ -1,4 +1,5 @@
 const { grupoArticuloRtModel } = require("../../models");
+const { getPaginacion, respuestaPaginada } = require("../../utils/paginacion");
 
 // Traduce los errores de Sequelize/SQL Server a mensajes claros para el cliente.
 const parseErrores = (error, fallback) => {
@@ -21,8 +22,14 @@ const parseErrores = (error, fallback) => {
 
 const getGruposArticuloRt = async (req, res) => {
   try {
-    const data = await grupoArticuloRtModel.findAll({ raw: true });
-    res.send({ result: data, success: true });
+    const { page, limit, offset } = getPaginacion(req.query);
+    const data = await grupoArticuloRtModel.findAndCountAll({
+      limit,
+      offset,
+      order: [["GRUPO_ARTICULO", "ASC"]],
+      raw: true,
+    });
+    res.send(respuestaPaginada(data, { page, limit }));
   } catch (error) {
     console.log(error);
     res.send({
