@@ -36,6 +36,20 @@ const models = {
   subtipoDocCCModel: require("./subtipoDocCC"),
   auxiliarCCModel: require("./AuxiliarCC"),
   responsable: require("./Responsable"),
+  globalesRuteoModel: require("./fr/GlobalesRuteo"),
+  visitaModel: require("./fr/Visita"),
+  grupoArticuloRtModel: require("./fr/GrupoArticuloRt"),
+  handheldRtModel: require("./fr/HandheldRt"),
+  rutaRtModel: require("./fr/RutaRt"),
+  clienteRtModel: require("./fr/ClienteRt"),
+  articuloRtModel: require("./fr/ArticuloRt"),
+  clienteErpModel: require("./fr/ClienteErp"),
+  articuloErpModel: require("./fr/ArticuloErp"),
+  grupoArtAsocRtModel: require("./fr/GrupoArtAsocRt"),
+  vendedorErpModel: require("./fr/VendedorErp"),
+  agenteRtModel: require("./fr/AgenteRt"),
+  bodegaErpModel: require("./fr/BodegaErp"),
+  bodegaRtModel: require("./fr/BodegaRt"),
 };
 
 module.exports = models;
