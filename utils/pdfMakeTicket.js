@@ -108,8 +108,8 @@ const generaPdfTicket = async (factura, _ano, empresa_id) => {
      cod.DIAS_NETO as diasNeto,
      cod.DESCRIPCION as formaPago
      FROM dte.dbo.dtes dte,
-     COAGRO2.CINCOH.DOCUMENTOS_CC doc,
-     COAGRO2.CINCOH.CONDICION_PAGO cod
+     COAGRO2.${empresa[0].esquemaBD}.DOCUMENTOS_CC doc,
+     COAGRO2.${empresa[0].esquemaBD}.CONDICION_PAGO cod
      WHERE dte.Dte_Id=${dteId} AND dte.dte=doc.documento AND doc.condicion_pago=cod.condicion_pago`,
     { type: QueryTypes.SELECT }
   );
@@ -186,6 +186,8 @@ const generaPdfTicket = async (factura, _ano, empresa_id) => {
     selloRecibido: _dte[0].selloRecibido,
     numeroControl: numeroControl,
     fechaHoraGeneracion: _dte[0].fecha + " " + _dte[0].hora,
+    fechaGeneracion: _dte[0].fecha,
+    horaGeneracion: _dte[0].hora,
 
     nombreEmisor: empresa[0].nombre,
     nitEmisor: empresa[0].nit,
