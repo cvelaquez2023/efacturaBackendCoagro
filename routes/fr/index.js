@@ -1,5 +1,11 @@
 const express = require("express");
+const authMiddleware = require("../../middleware/session");
+const checkRol = require("../../middleware/rol");
+
 const router = express.Router();
+
+// Todos los endpoints de facturacion de rutas: solo usuarios con rol Admin.
+router.use(authMiddleware, checkRol(["Admin"]));
 
 router.use("/visita", require("./visita"));
 router.use("/globalesRuteo", require("./globalesRuteo"));
