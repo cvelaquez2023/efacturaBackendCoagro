@@ -170,6 +170,8 @@ const obj = async (datos) => {
       numeroControl: filename,
       selloRecibido: _dte[0].selloRecibido,
       fechaHoraGeneracion: _dte[0].fecha + " " + _dte[0].hora,
+      fechaGeneracion: _dte[0].fecha,
+      horaGeneracion: _dte[0].hora,
       nombre: _dteReceptor[0].nombre,
       nombreComercial: _dteReceptor[0].nombreComercial,
       nit: _dteReceptor[0].nit,

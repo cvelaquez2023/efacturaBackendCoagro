@@ -1,7 +1,7 @@
 module.exports = {
-  format: "A4",
-  orientation: " portrait ",
-  header: { height: "1mm" },
-  footer: { height: "1mm" },
-  border: { top: "5px", bottom: "0px", left: "1px", },
+  format: "Letter",
+  orientation: "portrait",
+  header: { height: "0mm" },
+  footer: { height: "0mm" },
+  border: { top: "10mm", bottom: "13mm", left: "10mm", right: "10mm" },
 };
