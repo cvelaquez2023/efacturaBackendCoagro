@@ -21,5 +21,8 @@ router.use("/vendedorErp", require("./vendedorErp"));
 router.use("/agenteRt", require("./agenteRt"));
 router.use("/bodegaErp", require("./bodegaErp"));
 router.use("/bodegaRt", require("./bodegaRt"));
+router.use("/bodegaAsocRt", require("./bodegaAsocRt"));
+router.use("/consecutivoCiErp", require("./consecutivoCiErp"));
+router.use("/clienteAsocRt", require("./clienteAsocRt"));
 
 module.exports = router;
