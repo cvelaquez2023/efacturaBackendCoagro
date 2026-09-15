@@ -1,0 +1,109 @@
+[2026-09-15 15:20:14] [INFO] [cron] [startCron] Cron envioDte iniciado - cada 1 minuto
+[2026-09-15 15:21:01] [INFO] [cron] [envioDte] Encontrados 4885 DTEs pendientes
+[2026-09-15 15:21:01] [INFO] [cron] [envioDte] Enviando DTE: DTE-03-S003P001-000000000010276 (tipo 03, empresa 1)
+[2026-09-15 15:35:12] [INFO] [cron] [startCron] Cron envioDte iniciado - cada 1 minuto
+[2026-09-15 15:36:00] [INFO] [cron] [envioDte] Encontrados 4 DTEs pendientes
+[2026-09-15 15:36:00] [INFO] [cron] [envioDte] Enviando DTE: DTE-14-M001P000-26-000000000000064 (tipo 14, empresa 1, minutos: 26238)
+[2026-09-15 15:36:01] [ERROR] [cron] [envioDte] Error enviando DTE DTE-14-M001P000-26-000000000000064: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4259:19)
+    at successSteps (node:internal/deps/undici/undici:6882:27)
+    at readAllBytes (node:internal/deps/undici/undici:5807:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-15 15:36:01] [INFO] [cron] [envioDte] Enviando DTE: DTE-14-M001P000-26-000000000000065 (tipo 14, empresa 1, minutos: 26216)
+[2026-09-15 15:36:01] [ERROR] [cron] [envioDte] Error enviando DTE DTE-14-M001P000-26-000000000000065: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4259:19)
+    at successSteps (node:internal/deps/undici/undici:6882:27)
+    at readAllBytes (node:internal/deps/undici/undici:5807:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-15 15:36:01] [INFO] [cron] [envioDte] Enviando DTE: DTE-14-M001P000-26-000000000000066 (tipo 14, empresa 1, minutos: 19023)
+[2026-09-15 15:36:01] [ERROR] [cron] [envioDte] Error enviando DTE DTE-14-M001P000-26-000000000000066: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4259:19)
+    at successSteps (node:internal/deps/undici/undici:6882:27)
+    at readAllBytes (node:internal/deps/undici/undici:5807:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-15 15:36:01] [INFO] [cron] [envioDte] Enviando DTE: DTE-14-M001P000-26-000000000000067 (tipo 14, empresa 1, minutos: 19015)
+[2026-09-15 15:36:01] [ERROR] [cron] [envioDte] Error enviando DTE DTE-14-M001P000-26-000000000000067: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4259:19)
+    at successSteps (node:internal/deps/undici/undici:6882:27)
+    at readAllBytes (node:internal/deps/undici/undici:5807:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-15 15:36:01] [INFO] [cron] [envioDte] Cron envioDte completado en 1.03s - Enviados: 0, Errores: 4, Saltados: 0
+[2026-09-15 15:37:00] [INFO] [cron] [envioDte] Encontrados 4 DTEs pendientes
+[2026-09-15 15:37:00] [INFO] [cron] [envioDte] Enviando DTE: DTE-14-M001P000-26-000000000000064 (tipo 14, empresa 1, minutos: 26239)
+[2026-09-15 15:37:00] [ERROR] [cron] [envioDte] Error enviando DTE DTE-14-M001P000-26-000000000000064: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4259:19)
+    at successSteps (node:internal/deps/undici/undici:6882:27)
+    at readAllBytes (node:internal/deps/undici/undici:5807:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-15 15:37:00] [INFO] [cron] [envioDte] Enviando DTE: DTE-14-M001P000-26-000000000000065 (tipo 14, empresa 1, minutos: 26217)
+[2026-09-15 15:37:00] [ERROR] [cron] [envioDte] Error enviando DTE DTE-14-M001P000-26-000000000000065: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4259:19)
+    at successSteps (node:internal/deps/undici/undici:6882:27)
+    at readAllBytes (node:internal/deps/undici/undici:5807:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-15 15:37:00] [INFO] [cron] [envioDte] Enviando DTE: DTE-14-M001P000-26-000000000000066 (tipo 14, empresa 1, minutos: 19024)
+[2026-09-15 15:37:00] [ERROR] [cron] [envioDte] Error enviando DTE DTE-14-M001P000-26-000000000000066: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4259:19)
+    at successSteps (node:internal/deps/undici/undici:6882:27)
+    at readAllBytes (node:internal/deps/undici/undici:5807:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-15 15:37:00] [INFO] [cron] [envioDte] Enviando DTE: DTE-14-M001P000-26-000000000000067 (tipo 14, empresa 1, minutos: 19016)
+[2026-09-15 15:37:01] [ERROR] [cron] [envioDte] Error enviando DTE DTE-14-M001P000-26-000000000000067: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4259:19)
+    at successSteps (node:internal/deps/undici/undici:6882:27)
+    at readAllBytes (node:internal/deps/undici/undici:5807:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-15 15:37:01] [INFO] [cron] [envioDte] Cron envioDte completado en 0.99s - Enviados: 0, Errores: 4, Saltados: 0
+[2026-09-15 15:38:00] [INFO] [cron] [envioDte] Encontrados 4 DTEs pendientes
+[2026-09-15 15:38:00] [INFO] [cron] [envioDte] Enviando DTE: DTE-14-M001P000-26-000000000000064 (tipo 14, empresa 1, minutos: 26240)
+[2026-09-15 15:38:00] [ERROR] [cron] [envioDte] Error enviando DTE DTE-14-M001P000-26-000000000000064: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4259:19)
+    at successSteps (node:internal/deps/undici/undici:6882:27)
+    at readAllBytes (node:internal/deps/undici/undici:5807:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-15 15:38:00] [INFO] [cron] [envioDte] Enviando DTE: DTE-14-M001P000-26-000000000000065 (tipo 14, empresa 1, minutos: 26218)
+[2026-09-15 15:38:00] [ERROR] [cron] [envioDte] Error enviando DTE DTE-14-M001P000-26-000000000000065: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4259:19)
+    at successSteps (node:internal/deps/undici/undici:6882:27)
+    at readAllBytes (node:internal/deps/undici/undici:5807:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-15 15:38:00] [INFO] [cron] [envioDte] Enviando DTE: DTE-14-M001P000-26-000000000000066 (tipo 14, empresa 1, minutos: 19025)
+[2026-09-15 15:38:00] [ERROR] [cron] [envioDte] Error enviando DTE DTE-14-M001P000-26-000000000000066: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4259:19)
+    at successSteps (node:internal/deps/undici/undici:6882:27)
+    at readAllBytes (node:internal/deps/undici/undici:5807:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-15 15:38:00] [INFO] [cron] [envioDte] Enviando DTE: DTE-14-M001P000-26-000000000000067 (tipo 14, empresa 1, minutos: 19017)
+[2026-09-15 15:38:00] [ERROR] [cron] [envioDte] Error enviando DTE DTE-14-M001P000-26-000000000000067: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4259:19)
+    at successSteps (node:internal/deps/undici/undici:6882:27)
+    at readAllBytes (node:internal/deps/undici/undici:5807:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-15 15:38:00] [INFO] [cron] [envioDte] Cron envioDte completado en 0.97s - Enviados: 0, Errores: 4, Saltados: 0
+[2026-09-15 15:40:27] [INFO] [cron] [startCron] Cron envioDte iniciado - cada 1 minuto
+[2026-09-15 15:41:00] [INFO] [cron] [envioDte] No hay DTEs pendientes para enviar
+[2026-09-15 15:42:00] [INFO] [cron] [envioDte] No hay DTEs pendientes para enviar

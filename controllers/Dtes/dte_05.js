@@ -1,4 +1,4 @@
-const doc = require("pdfkit");
+﻿const doc = require("pdfkit");
 const {
   identificacion,
   emisor,
@@ -90,7 +90,7 @@ const postDte05 = async (req, res) => {
   /*
   if (_dteProcesado.length > 0) {
     if (_dteProcesado[0].estado == "PROCESADO") {
-      console.log("documento ya fue Porcesadp");
+      logger.info("Documento ya fue procesado", { controller: "dte_05", action: "postDte05" });
       return res.send({ messaje: "Documeto ya fue proceado", result: false });
     }
   }
@@ -101,7 +101,7 @@ const postDte05 = async (req, res) => {
 
 
   if (_docRela === undefined) {
-     console.log('problema en documento relacionado');
+     logger.warn("Problema en documento relacionado", { controller: "dte_05", action: "postDte05" });
     res.send({
       result: "error",
       success: false,
@@ -257,11 +257,11 @@ const postDte05 = async (req, res) => {
             requestOptions
           );
           const data = await response.json();
-	   console.log('respuestamh', data);
+	   logger.info("Respuesta MH data", { controller: "dte_05", action: "postDte05" });
           return data;
         }
       } catch (error) {
-        console.log("error", error);
+        logger.error("Error interno", { controller: "dte_05", action: "postDte05" });
       }
     };
 
@@ -278,7 +278,7 @@ const postDte05 = async (req, res) => {
       }
     }
     const _respuestaMH = await postrecepciondte();
-console.log(_respuestaMH)
+logger.info("Respuesta MH", { controller: "dte_05", action: "postDte05" })
     await guardarRespuestaMH(_respuestaMH, _factura, _empresa);
     await updateDte(_respuestaMH, _factura, _empresa);
     await updateFacturaDte(_factura, empresa);
@@ -352,7 +352,7 @@ await guardarObservacionesMH(
           });
           return;
         } catch (error) {
-          console.log(error);
+          logger.error("Error capturado", { controller: "dte_05", action: "postDte05" });
         }
         //enviamos correo a contabilidad para que corrigan porque esta rechazado
       } else if (_respuestaMH.estado == "PROCESADO") {
@@ -361,7 +361,7 @@ await guardarObservacionesMH(
         //await fac01(_factura);
         await generaPdf05(_factura, _ano, _empresa);
         setTimeout(function () {
-          console.log("procedemos a enviarlos");
+          logger.info("Procedemos a enviarlos", { controller: "dte_05", action: "postDte05" });
         }, 1000);
         const fileName = path.join(
           __dirname,
@@ -453,7 +453,7 @@ await guardarObservacionesMH(
     });
   }
  } catch (error) {
-   console.error("Error en postDte05:", error);
+   await notifyError("dte_05", "postDte05", error);
    if (res && !res.headersSent) {
      res.status(500).send({ messaje: "Error interno del servidor", result: false, error: error.message });
    }
@@ -470,7 +470,7 @@ const docRelacionados = async (datos, esquema) => {
 
 
     const docus = _documentosCC[0].APLICACION;
-   console.log('documento',docus);
+   logger.debug("Debug documento", { controller: "dte_05", action: "postDte05" });
     const dataccf = await buscarCCF(docus, esquema);
 
     if (dataccf.length === 0) return;
@@ -546,7 +546,7 @@ const docRelacionados = async (datos, esquema) => {
     }
     return datosRelacionados;
   } catch (error) {
-    console.log(error);
+    logger.error("Error capturado", { controller: "dte_05", action: "postDte05" });
   }
 };
 
@@ -758,7 +758,7 @@ const cuerpoDocLote = async (_factura, _documento, esquema,empresa_id) => {
       return _cuerpoDoc;
     }
   } catch (error) {
-    console.log(error);
+    logger.error("Error capturado", { controller: "dte_05", action: "postDte05" });
   }
 };
 
@@ -841,7 +841,7 @@ const resumen = async (_documento, esquema) => {
       return _resumen;
     }
   } catch (error) {
-    console.log(error);
+    logger.error("Error capturado", { controller: "dte_05", action: "postDte05" });
   }
 };
 const buscarCCF = async (ccf, esquema) => {
@@ -868,7 +868,7 @@ const buscarCCF = async (ccf, esquema) => {
         const corre = element.substring(19, 33);
         const core2 = corre.padStart(15, "0");
         const newConsecutivo = tipo + "-" + segmento2 + "-" + ano + "-" + core2;
-        console.log(newConsecutivo)
+        logger.debug("Debug consecutivo", { controller: "dte_05", action: "postDte05" })
         const _factura = await SqlFactura(newConsecutivo, esquema);
 
         if (_factura.length > 0) {
@@ -879,7 +879,8 @@ const buscarCCF = async (ccf, esquema) => {
 
     return arryDoc;
   } catch (error) {
-    console.log(error);
+    logger.error("Error capturado", { controller: "dte_05", action: "postDte05" });
   }
 };
 module.exports = postDte05;
+
