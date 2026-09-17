@@ -54,6 +54,7 @@ const models = {
   consecutivoCiErpModel: require("./fr/ConsecutivoCiErp"),
   clienteAsocRtModel: require("./fr/ClienteAsocRt"),
   agenteAsocRtModel: require("./fr/AgenteAsocRt"),
+  rutaAsignadaRtModel: require("./fr/RutaAsignadaRt"),
 };
 
 module.exports = models;
