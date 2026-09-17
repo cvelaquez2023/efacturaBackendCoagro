@@ -26,5 +26,6 @@ router.use("/consecutivoCiErp", require("./consecutivoCiErp"));
 router.use("/clienteAsocRt", require("./clienteAsocRt"));
 router.use("/agenteAsocRt", require("./agenteAsocRt"));
 router.use("/rutaAsignadaRt", require("./rutaAsignadaRt"));
+router.use("/rutaCliente", require("./rutaCliente"));
 
 module.exports = router;

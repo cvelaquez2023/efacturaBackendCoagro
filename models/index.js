@@ -55,6 +55,7 @@ const models = {
   clienteAsocRtModel: require("./fr/ClienteAsocRt"),
   agenteAsocRtModel: require("./fr/AgenteAsocRt"),
   rutaAsignadaRtModel: require("./fr/RutaAsignadaRt"),
+  rutaClienteModel: require("./fr/RutaCliente"),
 };
 
 module.exports = models;
