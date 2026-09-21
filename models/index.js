@@ -50,6 +50,12 @@ const models = {
   agenteRtModel: require("./fr/AgenteRt"),
   bodegaErpModel: require("./fr/BodegaErp"),
   bodegaRtModel: require("./fr/BodegaRt"),
+  bodegaAsocRtModel: require("./fr/BodegaAsocRt"),
+  consecutivoCiErpModel: require("./fr/ConsecutivoCiErp"),
+  clienteAsocRtModel: require("./fr/ClienteAsocRt"),
+  agenteAsocRtModel: require("./fr/AgenteAsocRt"),
+  rutaAsignadaRtModel: require("./fr/RutaAsignadaRt"),
+  rutaClienteModel: require("./fr/RutaCliente"),
 };
 
 module.exports = models;
