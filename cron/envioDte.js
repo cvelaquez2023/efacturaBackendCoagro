@@ -94,8 +94,13 @@ const enviarDtesPendientes = async () => {
 };
 
 const startCron = () => {
+  if (process.env.CRON_ENVIO_DTE !== "true") {
+    logger.info("Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE", { controller: "cron", action: "startCron" });
+    return;
+  }
   cron.schedule("* * * * *", enviarDtesPendientes);
   logger.info("Cron envioDte iniciado - cada 1 minuto", { controller: "cron", action: "startCron" });
 };
 
 module.exports = { startCron, enviarDtesPendientes };
+
