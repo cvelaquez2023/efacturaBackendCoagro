@@ -1,4 +1,4 @@
-//Factura de Sujecto Excluido
+﻿//Factura de Sujecto Excluido
 
 const doc = require("pdfkit");
 const {
@@ -123,7 +123,7 @@ const postDte14 = async (req, res) => {
       res.send({ response: "se guardar sin problemas", success: true });
       return;
     } catch (error) {
-      console.log(error);
+      logger.error("Error capturado", { controller: "dte_14", action: "postDte14" });
     }
   } else {
     //await generaPdf14(_form.aplicacion.dte);
@@ -258,7 +258,7 @@ const postDte14 = async (req, res) => {
       resumen: _resumen,
       apendice: null,
     };
-  console.log(datos,'datos');
+  logger.debug("Debug datos", { controller: "dte_14", action: "postDte14" });
     //Creo la firma
 
   const datafirma = {
@@ -297,17 +297,17 @@ const postDte14 = async (req, res) => {
           requestOptions
         );
         const data = await response.json();
-         console.log('respuestamh',data)
+         logger.debug("Respuesta MH data", { controller: "dte_14", action: "postDte14" })
         return data;
       } catch (error) {
-        console.log("error", error);
+        logger.error("Error interno", { controller: "dte_14", action: "postDte14" });
       }
     };
     const _dteProcesado = await SqlDte(_form.aplicacion.dte,_empresa);
   
     if (_dteProcesado.length > 0) {
       if (_dteProcesado[0].estado == "PROCESADO") {
-        console.log("documento ya fue Porcesadp");
+        logger.info("Documento ya fue procesado", { controller: "dte_14", action: "postDte14" });
         return res.send({ messaje: "Documeto ya fue proceado", result: false });
       }
     }
@@ -344,7 +344,7 @@ const postDte14 = async (req, res) => {
       if (_respuestaMH.estado === "RECHAZADO") {
         try {
                      //  await fac01(_factura);
-            console.log('empresa',empresa);
+            logger.debug("Debug empresa", { controller: "dte_14", action: "postDte14" });
           const fileName = path.join(
             __dirname,
             `../../storage/json/${empresa[0].esquemaBD}/dte14/rechazados/${_ano}/`
@@ -367,7 +367,7 @@ const postDte14 = async (req, res) => {
           });
           return;
         } catch (error) {
-          console.log(error);
+          logger.error("Error capturado", { controller: "dte_14", action: "postDte14" });
         }
         //enviamos correo a contabilidad para que corrigan porque esta rechazado
       } else if (_respuestaMH.estado == "PROCESADO") {
@@ -375,7 +375,7 @@ const postDte14 = async (req, res) => {
         await generaPdf14(_form.aplicacion.dte,_ano,_empresa);
         //await fac03(_factura);
         //await fac01(_factura);
-        console.log(empresa);
+        logger.debug("Debug empresa", { controller: "dte_14", action: "postDte14" });
 
         const fileName = path.join(
           __dirname,
@@ -414,7 +414,7 @@ const postDte14 = async (req, res) => {
     }
   }
  } catch (error) {
-   console.error("Error en postDte14:", error);
+   await notifyError("dte_14", "postDte14", error);
    if (res && !res.headersSent) {
      res.status(500).send({ messaje: "Error interno del servidor", result: false, error: error.message });
    }
@@ -488,3 +488,5 @@ const resumen = async (_factura) => {
 };
 
 module.exports = { postDte14 };
+
+

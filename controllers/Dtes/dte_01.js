@@ -1,4 +1,4 @@
-const { QueryTypes } = require("sequelize");
+﻿const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
 const { NumeroLetras } = require("../../config/letrasNumeros");
 const Sql = require("../../sqltx/sql");
@@ -15,7 +15,6 @@ const { emailRechazo, emailEnviado } = require("../../utils/email");
 const fs = require("fs");
 const path = require("path");
 const { transporter } = require("../../config/mailer");
-const { error } = require("console");
 const {
   guardarIdentificacion,
   guardarEmision,
@@ -129,7 +128,7 @@ const postDte01 = async (req, res) => {
   };
   //procedemos a recibir la firma del documento
   //convertimos descodificamos firma
-  console.log(dte,'dtes');
+  logger.debug("Debug dte", { controller: "dte_01", action: "postDte01" });
   const datafirma = {
     nit: empresa[0].nit,
     activo: true,
@@ -239,7 +238,7 @@ const postDte01 = async (req, res) => {
           return data;
         }
       } catch (error) {
-        console.log("error", error);
+        logger.error("Error interno", { controller: "dte_01", action: "postDte01" });
       }
     };
 
@@ -252,7 +251,7 @@ const postDte01 = async (req, res) => {
             type: QueryTypes.SELECT,
           }
         );
-        console.log("documento ya fue Porcesadp", _factura);
+        logger.info("Documento ya fue procesado", { controller: "dte_01", action: "postDte01" });
         return res.send({ messaje: "Documeto ya fue proceado", result: false });
       }
     }
@@ -280,7 +279,7 @@ const postDte01 = async (req, res) => {
       firma: _firma,
     };
     //console.log(JsonCliente);
-    console.log(_respuestaMH);
+    logger.info("Respuesta MH recibida", { controller: "dte_01", action: "postDte01" });
     if (_respuestaMH.codigoMsg === "004") {
       return;
     }
@@ -317,7 +316,7 @@ const postDte01 = async (req, res) => {
         });
         return;
       } catch (error) {
-        console.log(error);
+        logger.error("Error capturado", { controller: "dte_01", action: "postDte01" });
       }
     } else {
       if (_respuestaMH.estado === "RECHAZADO") {
@@ -355,7 +354,7 @@ const postDte01 = async (req, res) => {
           });
           return;
         } catch (error) {
-          console.log(error);
+          logger.error("Error capturado", { controller: "dte_01", action: "postDte01" });
         }
         //enviamos correo a contabilidad para que corrigan porque esta rechazado
       } else if (_respuestaMH.estado === "PROCESADO") {
@@ -367,7 +366,7 @@ const postDte01 = async (req, res) => {
           await generaPdf.generaPdf(_factura, _ano, _empresa);
         }
         setTimeout(function () {
-          console.log("procedemos a enviarlos");
+          logger.info("Procedemos a enviarlos", { controller: "dte_01", action: "postDte01" });
         }, 1000);
 
         //await fac03(_factura);
@@ -461,7 +460,7 @@ const postDte01 = async (req, res) => {
     });
   }
  } catch (error) {
-   console.error("Error en postDte01:", error);
+   await notifyError("dte_01", "postDte01", error);
    if (res && !res.headersSent) {
      res.status(500).send({ messaje: "Error interno del servidor", result: false, error: error.message });
    }
@@ -1086,3 +1085,4 @@ const resumen = async (_documento, esquema) => {
 };
 
 module.exports = { postDte01 };
+

@@ -1,4 +1,4 @@
-const { QueryTypes } = require("sequelize");
+﻿const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
 const { subtipoDocCCModel, documentoModel } = require("../../models");
 const { NumeroLetras } = require("../../config/letrasNumeros");
@@ -57,13 +57,13 @@ const postDte03 = async (req, res) => {
   const empresa = await Sqlempresa(_empresa);
   let estado = "";
   if (!_factura) {
-   console.log('es requerido en Numero de CCF');
+   logger.warn("Es requerido Numero de CCF", { controller: "dte_03", action: "postDte03" });
     return res.send({ messaje: "Es requerida Numero Factura", result: false });
   }
 
   const _docExit = await SqlDocumentoCC(_factura, empresa[0].esquemaBD);
   if (_docExit.length === 0) {
-      console.log( _factura,'CCF No Existe en Cuentas por Cobrar ');
+      logger.warn("CCF No Existe en Cuentas por Cobrar", { controller: "dte_03", action: "postDte03" });
     return res.send({ messaje: "Documento no existe", result: false });
   }
 
@@ -240,7 +240,7 @@ const postDte03 = async (req, res) => {
           return data;
         }
       } catch (error) {
-        console.log("error", error);
+        logger.error("Error interno", { controller: "dte_03", action: "postDte03" });
       }
     };
     const _dteProcesado = await SqlDte(_factura, empresa[0].Empresa_id);
@@ -257,7 +257,7 @@ const postDte03 = async (req, res) => {
     }
 
     const _respuestaMH = await postrecepciondte();
-     console.log(_respuestaMH);
+     logger.info("Respuesta MH recibida", { controller: "dte_03", action: "postDte03" });
     if (_respuestaMH.codigoMsg === "097") {
       return;
     }
@@ -338,7 +338,7 @@ const postDte03 = async (req, res) => {
           });
           return;
         } catch (error) {
-          console.log(error);
+          logger.error("Error capturado", { controller: "dte_03", action: "postDte03" });
         }
         //enviamos correo a contabilidad para que corrigan porque esta rechazado
       } else if (_respuestaMH.estado === "PROCESADO") {
@@ -352,7 +352,7 @@ const postDte03 = async (req, res) => {
           await generaPdf.generaPdf(_factura, _ano, _empresa);
         }
         setTimeout(function () {
-          console.log("procedemos a enviarlos");
+          logger.info("Procedemos a enviarlos", { controller: "dte_03", action: "postDte03" });
         }, 1000);
 
         const fileName = path.join(
@@ -445,7 +445,7 @@ const postDte03 = async (req, res) => {
     });
   }
  } catch (error) {
-   console.error("Error en postDte03:", error);
+   await notifyError("dte_03", "postDte03", error);
    if (res && !res.headersSent) {
      res.status(500).send({ messaje: "Error interno del servidor", result: false, error: error.message });
    }
@@ -581,7 +581,7 @@ try {
       const _totalPagar = totalLinea - totalDescuento + totalImpuesto1;
       return _cuerpoDoc;
     } catch (error) {
-      console.log(error);
+      logger.error("Error capturado", { controller: "dte_03", action: "postDte03" });
     }
 }  
  else {
@@ -651,7 +651,7 @@ try {
       const _totalPagar = totalLinea - totalDescuento + totalImpuesto1;
       return _cuerpoDoc;
     } catch (error) {
-      console.log(error);
+      logger.error("Error capturado", { controller: "dte_03", action: "postDte03" });
     }
   }
 };
@@ -723,7 +723,7 @@ const cuerpoDocLote = async (_documento, tipo, esquema) => {
       const _totalPagar = totalLinea - totalDescuento + totalImpuesto1;
       return _cuerpoDoc;
     } catch (error) {
-      console.log(error);
+      logger.error("Error capturado", { controller: "dte_03", action: "postDte03" });
     }
   } 
 
@@ -791,7 +791,7 @@ const cuerpoDocLote = async (_documento, tipo, esquema) => {
       const _totalPagar = totalLinea - totalDescuento + totalImpuesto1;
       return _cuerpoDoc;
     } catch (error) {
-      console.log(error);
+      logger.error("Error capturado", { controller: "dte_03", action: "postDte03" });
     }
 
 }
@@ -862,7 +862,7 @@ else {
       const _totalPagar = totalLinea - totalDescuento + totalImpuesto1;
       return _cuerpoDoc;
     } catch (error) {
-      console.log(error);
+      logger.error("Error capturado", { controller: "dte_03", action: "postDte03" });
     }
   }
   const dataFacLinea = await sequelize.query(
@@ -994,3 +994,5 @@ const resumen = async (_documento, esquema) => {
 };
 
 module.exports = { postDte03 };
+
+

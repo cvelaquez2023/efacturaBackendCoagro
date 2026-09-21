@@ -1,4 +1,4 @@
-const { QueryTypes } = require("sequelize");
+﻿const { QueryTypes } = require("sequelize");
 const fs = require("fs");
 const path = require("path");
 const {
@@ -56,7 +56,7 @@ const postDte11 = async (req, res) => {
   const _dteProcesado = await SqlDte(_factura, _empresa);
   if (_dteProcesado.length > 0) {
     if (_dteProcesado[0].estado == "PROCESADO") {
-      console.log("documento ya fue Porcesadp");
+      logger.info("Documento ya fue procesado", { controller: "dte_11", action: "postDte11" });
       return res.send({ messaje: "Documeto ya fue proceado", result: false });
     }
   }
@@ -99,7 +99,7 @@ const postDte11 = async (req, res) => {
     apendice: _apendice,
   };
 
-console.log('dete',dte);
+logger.debug("Debug dete", { controller: "dte_11", action: "postDte11" });
 const _fechaFac = await SqlFactura(_factura, empresa[0].esquemaBD);
   const _vendedor = await SqlVendedorCodigo(
     _fechaFac[0].VENDEDOR,
@@ -209,7 +209,7 @@ const _fechaFac = await SqlFactura(_factura, empresa[0].esquemaBD);
         return data;
       }
     } catch (error) {
-      console.log("error", error);
+      logger.error("Error interno", { controller: "dte_11", action: "postDte11" });
     }
   };
 
@@ -241,7 +241,7 @@ const _fechaFac = await SqlFactura(_factura, empresa[0].esquemaBD);
       try {
         await generaPdf(_factura,_ano,_empresa);
         setTimeout(function () {
-          console.log("procedemos a enviarlos");
+          logger.info("Procedemos a enviarlos", { controller: "dte_11", action: "postDte11" });
         }, 1000);
         const fileName = path.join(
           __dirname,
@@ -273,7 +273,7 @@ const _fechaFac = await SqlFactura(_factura, empresa[0].esquemaBD);
         });
         return;
       } catch (error) {
-        console.log(error);
+        logger.error("Error capturado", { controller: "dte_11", action: "postDte11" });
       }
       //enviamos correo a contabilidad para que corrigan porque esta rechazado
     } else if (_respuestaMH.estado === "PROCESADO") {
@@ -281,7 +281,7 @@ const _fechaFac = await SqlFactura(_factura, empresa[0].esquemaBD);
 
       await generaPdf(_factura, _ano, _empresa);
       setTimeout(function () {
-        console.log("procedemos a enviarlos");
+        logger.info("Procedemos a enviarlos", { controller: "dte_11", action: "postDte11" });
       }, 1000);
       //await fac03(_factura);
       //await fac01(_factura);
@@ -329,7 +329,7 @@ const _fechaFac = await SqlFactura(_factura, empresa[0].esquemaBD);
     }
   }
  } catch (error) {
-   console.error("Error en postDte11:", error);
+   await notifyError("dte_11", "postDte11", error);
    if (res && !res.headersSent) {
      res.status(500).send({ messaje: "Error interno del servidor", result: false, error: error.message });
    }
@@ -427,3 +427,4 @@ const resumen = async (_documento, esquema) => {
   return _resumen;
 };
 module.exports = postDte11;
+
