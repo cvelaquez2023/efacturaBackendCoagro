@@ -8,12 +8,29 @@ const {
   deleteAgenteAsocRt,
 } = require("../../controllers/fr/agenteAsocRt");
 
+const authMiddleware = require("../../middleware/session");
+const checkRol = require("../../middleware/rol");
 const router = express.Router();
 
-router.get("/", getAgentesAsocRt);
-router.get("/:agente", getAgenteAsocRt);
-router.post("/", postAgenteAsocRt);
-router.put("/:agente", putAgenteAsocRt);
-router.delete("/:agente", deleteAgenteAsocRt);
+router.get("/", authMiddleware, checkRol(["Admin", "Fr"]), getAgentesAsocRt);
+router.get(
+  "/:agente",
+  authMiddleware,
+  checkRol(["Admin", "Fr"]),
+  getAgenteAsocRt,
+);
+router.post("/", authMiddleware, checkRol(["Admin", "Fr"]), postAgenteAsocRt);
+router.put(
+  "/:agente",
+  authMiddleware,
+  checkRol(["Admin", "Fr"]),
+  putAgenteAsocRt,
+);
+router.delete(
+  "/:agente",
+  authMiddleware,
+  checkRol(["Admin", "Fr"]),
+  deleteAgenteAsocRt,
+);
 
 module.exports = router;

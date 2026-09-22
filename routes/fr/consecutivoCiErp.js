@@ -7,7 +7,10 @@ const {
 
 const router = express.Router();
 
-router.get("/", getConsecutivosCiErp);
-router.get("/:consecutivo", getConsecutivoCiErp);
+const authMiddleware = require("../../middleware/session");
+const checkRol = require("../../middleware/rol");
+
+router.get("/", authMiddleware, checkRol(["Admin", "Fr"]), getConsecutivosCiErp);
+router.get("/:consecutivo", authMiddleware, checkRol(["Admin", "Fr"]), getConsecutivoCiErp);
 
 module.exports = router;

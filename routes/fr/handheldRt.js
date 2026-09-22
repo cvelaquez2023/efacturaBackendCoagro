@@ -10,10 +10,13 @@ const {
 
 const router = express.Router();
 
-router.get("/", getHandheldsRt);
-router.get("/:handheld", getHandheldRt);
-router.post("/", postHandheldRt);
-router.put("/:handheld", putHandheldRt);
-router.delete("/:handheld", deleteHandheldRt);
+const authMiddleware = require("../../middleware/session");
+const checkRol = require("../../middleware/rol");
+
+router.get("/", authMiddleware, checkRol(["Admin", "Fr"]), getHandheldsRt);
+router.get("/:handheld", authMiddleware, checkRol(["Admin", "Fr"]), getHandheldRt);
+router.post("/", authMiddleware, checkRol(["Admin", "Fr"]), postHandheldRt);
+router.put("/:handheld", authMiddleware, checkRol(["Admin", "Fr"]), putHandheldRt);
+router.delete("/:handheld", authMiddleware, checkRol(["Admin", "Fr"]), deleteHandheldRt);
 
 module.exports = router;
