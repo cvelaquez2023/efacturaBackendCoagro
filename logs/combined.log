@@ -112,3 +112,8 @@ SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
 [2026-09-15 16:09:01] [INFO] [cron] [envioDte] No hay DTEs pendientes para enviar
 [2026-09-15 16:10:01] [INFO] [cron] [envioDte] No hay DTEs pendientes para enviar
 [2026-09-15 16:11:00] [INFO] [cron] [envioDte] No hay DTEs pendientes para enviar
+[2026-09-24 20:42:49] [INFO] [cron] [startCron] Cron envioDte iniciado - cada 1 minuto
+[2026-09-24 20:43:00] [INFO] [cron] [envioDte] No hay DTEs pendientes para enviar
+[2026-09-24 20:44:00] [INFO] [cron] [envioDte] No hay DTEs pendientes para enviar
+[2026-09-24 20:45:00] [INFO] [cron] [envioDte] No hay DTEs pendientes para enviar
+[2026-09-24 20:46:00] [INFO] [cron] [envioDte] No hay DTEs pendientes para enviar
