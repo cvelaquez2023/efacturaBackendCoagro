@@ -9,11 +9,13 @@ const {
 } = require("../../controllers/fr/agenteRt");
 
 const router = express.Router();
+const authMiddleware = require("../../middleware/session");
+const checkRol = require("../../middleware/rol");
 
-router.get("/", getAgentesRt);
-router.get("/:agente", getAgenteRt);
-router.post("/", postAgenteRt);
-router.put("/:agente", putAgenteRt);
-router.delete("/:agente", deleteAgenteRt);
+router.get("/", authMiddleware, checkRol(["Admin", "Fr"]), getAgentesRt);
+router.get("/:agente", authMiddleware, checkRol(["Admin", "Fr"]), getAgenteRt);
+router.post("/", authMiddleware, checkRol(["Admin", "Fr"]), postAgenteRt);
+router.put("/:agente", authMiddleware, checkRol(["Admin", "Fr"]), putAgenteRt);
+router.delete("/:agente", authMiddleware, checkRol(["Admin", "Fr"]), deleteAgenteRt);
 
 module.exports = router;

@@ -15,7 +15,10 @@ const envioMail = async (req, res) => {
     const User = req.cliente;
     const _ano2='20'+_ano
 
-    await emailEnviado(dt01, correo, process.env.DTE_CORREO,'Reenvio', tipo00,_ano2,User[0].empresa);
+    const envio = await emailEnviado(dt01, correo, process.env.DTE_CORREO,'Reenvio', tipo00,_ano2,User[0].empresa);
+    if (!envio.ok) {
+      return res.status(500).send({ result: "No se pudo enviar el correo", success: false, error: envio.error });
+    }
     res.send({ result: "Correo Enviado", success: true });
   } catch (error) {
     await notifyError("envioMail", "envioMail", error, "DTE: " + req.body.dte);

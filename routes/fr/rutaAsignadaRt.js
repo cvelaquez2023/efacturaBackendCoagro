@@ -10,10 +10,13 @@ const {
 
 const router = express.Router();
 
-router.get("/", getRutasAsignadasRt);
-router.get("/:ruta", getRutaAsignadaRt);
-router.post("/", postRutaAsignadaRt);
-router.put("/:ruta", putRutaAsignadaRt);
-router.delete("/:ruta", deleteRutaAsignadaRt);
+const authMiddleware = require("../../middleware/session");
+const checkRol = require("../../middleware/rol");
+
+router.get("/", authMiddleware, checkRol(["Admin", "Fr"]), getRutasAsignadasRt);
+router.get("/:ruta", authMiddleware, checkRol(["Admin", "Fr"]), getRutaAsignadaRt);
+router.post("/", authMiddleware, checkRol(["Admin", "Fr"]), postRutaAsignadaRt);
+router.put("/:ruta", authMiddleware, checkRol(["Admin", "Fr"]), putRutaAsignadaRt);
+router.delete("/:ruta", authMiddleware, checkRol(["Admin", "Fr"]), deleteRutaAsignadaRt);
 
 module.exports = router;

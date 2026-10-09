@@ -11,15 +11,19 @@ const { sequelize } = require("../config/mssql");
 const { QueryTypes } = require("sequelize");
 const { Sqlempresa } = require("../sqltx/sql");
 
+// Logo de la empresa emisora (empresa.logoUrl guarda base64). Sin logo, queda en blanco.
 const getLogoBase64 = (empresa) => {
-  const logoPath = path.join(__dirname, "../template/logo.jpeg");
-  if (fs.existsSync(logoPath)) {
-    return "data:image/jpeg;base64," + fs.readFileSync(logoPath).toString("base64");
-  }
-  if (empresa && empresa[0] && empresa[0].logoUrl) {
-    return empresa[0].logoUrl;
-  }
-  return "";
+  const logo = ((empresa && empresa[0] && empresa[0].logoUrl) || "").trim();
+  if (!logo) return "";
+  if (logo.startsWith("data:")) return logo;
+  const mime = logo.startsWith("iVBOR") ? "image/png" : "image/jpeg";
+  return `data:${mime};base64,${logo}`;
+};
+
+// Algunos DTE guardaron el texto 'null' como nombre comercial; en ese caso se usa el respaldo.
+const nombreValido = (valor, respaldo = "") => {
+  const texto = (valor || "").trim();
+  return texto && texto.toLowerCase() !== "null" ? texto : respaldo;
 };
 
 const findChromePath = () => {
@@ -39,20 +43,23 @@ const generatePdfWithPuppeteer = async (htmlContent, outputPath) => {
     launchOptions.executablePath = chromePath;
   }
   const browser = await puppeteer.launch(launchOptions);
-  const page = await browser.newPage();
-  await page.setContent(htmlContent, { waitUntil: "domcontentloaded" });
-  await page.pdf({
-    path: outputPath,
-    format: "Letter",
-    printBackground: true,
-    margin: {
-      top: "10mm",
-      bottom: "13mm",
-      left: "10mm",
-      right: "10mm",
-    },
-  });
-  await browser.close();
+  try {
+    const page = await browser.newPage();
+    await page.setContent(htmlContent, { waitUntil: "domcontentloaded" });
+    await page.pdf({
+      path: outputPath,
+      format: "Letter",
+      printBackground: true,
+      margin: {
+        top: "10mm",
+        bottom: "13mm",
+        left: "10mm",
+        right: "10mm",
+      },
+    });
+  } finally {
+    await browser.close();
+  }
 };
 
 const generaPdf = async (datos, _ano, empresa_id) => {
@@ -233,6 +240,10 @@ const generaPdf = async (datos, _ano, empresa_id) => {
     tipo = "COMPROBANTE DE EXPORTACION";
     dir = "dte11";
   }
+  const nombreComercialEmisor = nombreValido(
+    _dteEmisior[0].nombreComercial,
+    _dteEmisior[0].nombre,
+  );
   const obj = {
     logoUrl: getLogoBase64(empresa),
     tipoDoc: tipo,
@@ -249,7 +260,11 @@ const generaPdf = async (datos, _ano, empresa_id) => {
     direccionEmisor: _dteEmisior[0].direccion_compl,
     telefonoEmisor: _dteEmisior[0].telefono,
     correoEmisor: _dteEmisior[0].correo,
-    nombreComercialEmisor: _dteEmisior[0].nombreComercial,
+    nombreComercialEmisor: nombreComercialEmisor,
+    // El pagaré solo agrega "que se abrevia ..." cuando el alias difiere de la razón social.
+    aliasDistintoEmisor:
+      nombreComercialEmisor.toUpperCase() !==
+      (_dteEmisior[0].nombre || "").trim().toUpperCase(),
     nombre: _dteReceptor[0].nombre,
     nombreComercial: _dteReceptor[0].nombreComercial,
     nit: _dteReceptor[0].nit,
@@ -442,6 +457,10 @@ const generaPdf05 = async (datos, _ano, _empresa) => {
     `select * from dte.dbo.receptor where  dte_Id=${_idDte}`,
     { type: QueryTypes.SELECT },
   );
+  const _dteEmisior = await sequelize.query(
+    `select * from dte.dbo.emisor where  dte_Id=${_idDte}`,
+    { type: QueryTypes.SELECT },
+  );
 
   const _dteResumen = await sequelize.query(
     `select * from dte.dbo.resumen where  dte_Id=${_idDte}`,
@@ -566,8 +585,22 @@ const generaPdf05 = async (datos, _ano, _empresa) => {
     fechaHoraGeneracion: _dte[0].fecha + " " + _dte[0].hora,
     fechaGeneracion: _dte[0].fecha,
     horaGeneracion: _dte[0].hora,
+    nombreEmisor: _dteEmisior[0].nombre,
+    nitEmisor: _dteEmisior[0].nit,
+    nrcEmisor: _dteEmisior[0].nrc,
+    actividadEmisor: _dteEmisior[0].descActividad,
+    direccionEmisor: _dteEmisior[0].direccion_compl,
+    telefonoEmisor: _dteEmisior[0].telefono,
+    correoEmisor: _dteEmisior[0].correo,
+    nombreComercialEmisor: nombreValido(
+      _dteEmisior[0].nombreComercial,
+      _dteEmisior[0].nombre,
+    ),
     nombre: _dteReceptor[0].nombre,
-    nombreComercial: _dteReceptor[0].nombreComercial,
+    nombreComercial: nombreValido(
+      _dteReceptor[0].nombreComercial,
+      _dteReceptor[0].nombre,
+    ),
     nit: _dteReceptor[0].nit,
     nrc: _dteReceptor[0].nrc,
     descActividad: _dteReceptor[0].descActividad,
@@ -597,24 +630,17 @@ const generaPdf05 = async (datos, _ano, _empresa) => {
     apDirecion: ApDirecion,
   };
 
-  const document = {
-    html: html,
-    data: {
-      products: obj,
-    },
-    path:
-      `../backend/storage/pdf/${empresa[0].esquemaBD}/${dir}/${_ano}/` +
-      filePdf,
-  };
-
-  await pdf
-    .create(document, options)
-    .then((res) => {
-      console.log("respuesta", res);
-    })
-    .catch((error) => {
-      console.log(error);
-    });
+  const compiledHtml = hbs.compile(html)({ products: obj });
+  const outputDir = path.join(
+    __dirname,
+    `../storage/pdf/${empresa[0].esquemaBD}/${dir}/${_ano}`,
+  );
+  const outputPath = path.join(outputDir, filePdf);
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+  await generatePdfWithPuppeteer(compiledHtml, outputPath);
+  console.log("PDF DTE-05 generado con Puppeteer:", outputPath);
 };
 const generaPdf14 = async (datos, _ano, _empresa) => {
   const filename = datos.replace("-26-", "-");
@@ -653,7 +679,7 @@ const generaPdf14 = async (datos, _ano, _empresa) => {
   );
   const datosQr = {
     fechaEmi: moment
-      .tz(_dte[0].fechaHoraGeneracion, "America/El_Salvador")
+      .tz(_dte[0].fechaemision, "America/El_Salvador")
       .format("YYYY-MM-DD"),
     codGen: _dte[0].codigoGeneracion,
     ambiente: process.env.DTE_AMBIENTE,
@@ -731,7 +757,10 @@ const generaPdf14 = async (datos, _ano, _empresa) => {
     direccionEmisor: _dteEmisior[0].direccion_compl,
     telefonoEmisor: _dteEmisior[0].telefono,
     correoEmisor: _dteEmisior[0].correo,
-    nombreComercialEmisor: _dteEmisior[0].nombreComercial,
+    nombreComercialEmisor: nombreValido(
+      _dteEmisior[0].nombreComercial,
+      _dteEmisior[0].nombre,
+    ),
     nombre: _dteSujetoExcluido[0].nombre,
     nit: _dteSujetoExcluido[0].nit,
     descActividad: _dteSujetoExcluido[0].descActividad,
@@ -747,25 +776,17 @@ const generaPdf14 = async (datos, _ano, _empresa) => {
     totalPagar: _dteResumen[0].totalPagar.toFixed(2),
     totalLetras: _dteResumen[0].totalLetras,
   };
-  //console.log(obj);
 
-  const document = {
-    html: html,
-    data: {
-      products: obj,
-    },
-    path:
-      `../backend/storage/pdf/${empresa[0].esquemaBD}/${dir}/${_ano}/` +
-      filePdf,
-  };
-
-  await pdf
-    .create(document, options)
-    .then((res) => {
-      console.log("respuesta", res);
-    })
-    .catch((error) => {
-      console.log(error);
-    });
+  const compiledHtml = hbs.compile(html)({ products: obj });
+  const outputDir = path.join(
+    __dirname,
+    `../storage/pdf/${empresa[0].esquemaBD}/${dir}/${_ano}`,
+  );
+  const outputPath = path.join(outputDir, filePdf);
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+  await generatePdfWithPuppeteer(compiledHtml, outputPath);
+  console.log("PDF DTE-14 generado con Puppeteer:", outputPath);
 };
 module.exports = { generaPdf, generaPdf07, generaPdf05, generaPdf14 };
