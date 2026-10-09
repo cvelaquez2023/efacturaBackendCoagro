@@ -9,6 +9,8 @@ const {
 } = require("../../controllers/fr/agenteRt");
 
 const router = express.Router();
+const authMiddleware = require("../../middleware/session");
+const checkRol = require("../../middleware/rol");
 
 router.get("/", authMiddleware, checkRol(["Admin", "Fr"]), getAgentesRt);
 router.get("/:agente", authMiddleware, checkRol(["Admin", "Fr"]), getAgenteRt);

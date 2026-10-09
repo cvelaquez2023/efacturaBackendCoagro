@@ -10,6 +10,7 @@ const {
 
 const authMiddleware = require("../../middleware/session");
 const checkRol = require("../../middleware/rol");
+
 const router = express.Router();
 
 router.get("/", authMiddleware, checkRol(["Admin", "Fr"]), getAgentesAsocRt);
