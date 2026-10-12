@@ -4,6 +4,7 @@ const checkRol = require("../../middleware/rol");
 
 const router = express.Router();
 
+router.use("/sync", require("./sync"));
 // Todos los endpoints de facturacion de rutas: solo usuarios con rol Admin.
 router.use(authMiddleware, checkRol(["Admin"]));
 
@@ -28,5 +29,6 @@ router.use("/agenteAsocRt", require("./agenteAsocRt"));
 router.use("/rutaAsignadaRt", require("./rutaAsignadaRt"));
 router.use("/rutaCliente", require("./rutaCliente"));
 router.use("/rutaConsecutRt", require("./rutaConsecutRt"));
+
 
 module.exports = router;
