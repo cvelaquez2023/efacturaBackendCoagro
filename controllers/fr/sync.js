@@ -4,8 +4,8 @@
 //   - erpadmin.cliente     -> datos del cliente (nombre, dirección, etc.)
 //   - rutaRt               -> SOLO el nombre (DESCRIPCION) de cada ruta, para los filtros
 //
-// GET /fr/sync/clientes            -> todas las rutas
-// GET /fr/sync/clientes?ruta=001   -> solo esa ruta (varias: ?ruta=001,002)
+// GET /fr/sync/clientes   (header Authorization: Bearer <token movil>)
+// Solo las rutas asignadas a la handheld del token (ver middleware/mobileSession.js).
 //
 // Respuesta:
 // {
@@ -44,17 +44,9 @@ const porLotes = async (lista, consulta, tamano = 500) => {
 
 const getSyncClientes = async (req, res) => {
   try {
-    const rutasFiltro = req.query.ruta
-      ? String(req.query.ruta)
-          .split(",")
-          .map((r) => r.trim())
-          .filter(Boolean)
-      : null;
-    const whereRuta = rutasFiltro && rutasFiltro.length ? { RUTA: rutasFiltro } : {};
-
-    // 1) Asignacion ruta-cliente-dia-orden (tabla rutaCliente)
+    // 1) Asignacion ruta-cliente-dia-orden (tabla rutaCliente) de las rutas de la handheld
     const asignaciones = await rutaClienteModel.findAll({
-      where: whereRuta,
+      where: { RUTA: req.mobile.codigosRuta },
       order: [
         ["RUTA", "ASC"],
         ["DIA", "ASC"],
@@ -145,4 +137,122 @@ const getSyncClientes = async (req, res) => {
   }
 };
 
-module.exports = { getSyncClientes };
+//
+// GET /fr/sync/articulos   (header Authorization: Bearer <token movil>)
+// Solo los grupos de articulo y bodegas de las rutas de la handheld del token.
+//
+// Tablas:
+//   - erpadmin.RUTA_ASIGNADA_RT     -> de la ruta salen GRUPO_ARTICULO y BODEGA
+//   - erpadmin.ARTICULO             -> catalogo de articulos (se filtra por GRP_ART)
+//   - erpadmin.ARTICULO_EXISTENCIA  -> existencia por articulo y bodega (se filtra por BODEGA)
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     articulos:   [{ GRP_ART, COD_ART, COD_CIA, DES_ART, ... }],    -> ARTICULO
+//     existencias: [{ ARTICULO, COMPANIA, BODEGA, EXISTENCIA }],     -> ARTICULO_EXISTENCIA
+//   }
+// }
+//
+// Notas:
+//  - La handheld une las dos listas por ARTICULO_EXISTENCIA.ARTICULO = ARTICULO.COD_ART.
+//  - Solo se envian existencias de articulos que vienen en `articulos`.
+
+const CAMPOS_ARTICULO = `GRP_ART, COD_ART, COD_CIA, UND_EMP, EMP_ALM, EMP_DET, COD_BAR, DES_ART,
+  COD_FAM, COD_CLS, IMPUESTO, USA_LOTES, COSTO_LOCAL, COSTO_DOLAR, FACTOR_PRECIO, ORDEN_ART,
+  FACTOR_VENTA, ARTICULO_ENVASE, TIPO, CODIGO_RETENCION, RETENCION_VENTA, RETENCION_COMPRA,
+  MODELO_RETENCION, CLASIFICACION3, CLASIFICACION4, CLASIFICACION5, CLASIFICACION6,
+  TIPO_DOC_IVA, NIT, CANASTA_BASICA, ES_OTRO_CARGO, TIPO_VENTA`;
+
+const getSyncArticulos = async (req, res) => {
+  try {
+    // 1) Grupos de articulo y bodegas de las rutas de la handheld (ya resueltas por mobileSession)
+    const grupos = [...new Set(req.mobile.rutas.map((r) => String(r.GRUPO_ARTICULO).trim()))];
+    const bodegas = [...new Set(req.mobile.rutas.map((r) => String(r.BODEGA).trim()))];
+
+    // 2) Articulos de esos grupos
+    const articulos = await sequelize.query(
+      `SELECT ${CAMPOS_ARTICULO}
+         FROM COAGRO2.erpadmin.ARTICULO
+        WHERE GRP_ART IN (:grupos)
+        ORDER BY ORDEN_ART, DES_ART`,
+      { replacements: { grupos }, type: QueryTypes.SELECT }
+    );
+
+    // 3) Existencias de esas bodegas, solo de los articulos enviados
+    const existenciasRows = await sequelize.query(
+      `SELECT ARTICULO, COMPANIA, BODEGA, EXISTENCIA
+         FROM COAGRO2.erpadmin.ARTICULO_EXISTENCIA
+        WHERE BODEGA IN (:bodegas)
+        ORDER BY BODEGA, ARTICULO`,
+      { replacements: { bodegas }, type: QueryTypes.SELECT }
+    );
+    const codigos = new Set(articulos.map((a) => String(a.COD_ART).trim()));
+    const existencias = existenciasRows.filter((e) => codigos.has(String(e.ARTICULO).trim()));
+
+    res.send({
+      result: { articulos, existencias },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de articulos"],
+    });
+  }
+};
+
+//
+// GET /fr/sync/cobros   (header Authorization: Bearer <token movil>)
+// Solo los documentos de las rutas de la handheld del token.
+//
+// Tabla: erpadmin.alCXC_PEN_COB (documentos de CxC con saldo, por ruta y cliente).
+// PK: (COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT). COD_ZON es la ruta.
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     documentos: [{ COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT, SALDO_LOCAL, ... }] -> alCXC_PEN_COB
+//   }
+// }
+//
+// Nota: la handheld une con los clientes por COD_ZON + COD_CLT.
+
+const CAMPOS_PEN_COB = `COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT, SALDO_DOLAR, SALDO_LOCAL,
+  MONTO_DOLAR, MONTO_LOCAL, FEC_DOC_FT, FEC_PRO, FEC_VEN, IND_MON, IND_ANL, TIP_CMB_DOL,
+  CONDICION_PAGO, SUBTOTAL, TIP_CMB_LOC, CLASE_DOCUMENTO, INCOTERMS, FORMAS_PAGO,
+  NATURALEZA_OPERACION, CUFE, CODIGOQR, INDICADOR_FACTURACION`;
+
+const getSyncCobros = async (req, res) => {
+  try {
+    const documentos = await sequelize.query(
+      `SELECT ${CAMPOS_PEN_COB}
+         FROM COAGRO2.erpadmin.alCXC_PEN_COB
+        WHERE COD_ZON IN (:rutas)
+        ORDER BY COD_ZON, COD_CLT, FEC_VEN, NUM_DOC`,
+      { replacements: { rutas: req.mobile.codigosRuta }, type: QueryTypes.SELECT }
+    );
+
+    res.send({
+      result: { documentos },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de cobros"],
+    });
+  }
+};
+
+module.exports = { getSyncClientes, getSyncArticulos, getSyncCobros };

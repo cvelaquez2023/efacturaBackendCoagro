@@ -4,10 +4,13 @@ const checkRol = require("../../middleware/rol");
 
 const router = express.Router();
 
+// App movil: registro/login sin sesion; la sync exige el token movil (rol RUTA).
+router.use("/mobile", require("./mobile"));
 router.use("/sync", require("./sync"));
 // Todos los endpoints de facturacion de rutas: solo usuarios con rol Admin.
 router.use(authMiddleware, checkRol(["Admin"]));
 
+router.use("/usuarioMovil", require("./usuarioMovil"));
 router.use("/visita", require("./visita"));
 router.use("/globalesRuteo", require("./globalesRuteo"));
 router.use("/grupoArticuloRt", require("./grupoArticuloRt"));

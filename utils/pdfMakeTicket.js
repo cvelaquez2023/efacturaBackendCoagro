@@ -5,6 +5,7 @@ const moment = require("moment-timezone");
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../config/mssql");
 const { Sqlempresa } = require("../sqltx/sql");
+const { numeroControl } = require("./numeroControl");
 const { toString } = require("qrcode");
 
 const fmt = (value = 0) =>
@@ -232,7 +233,7 @@ const generaPdfTicket = async (factura, _ano, empresa_id) => {
   };
 
   const dir = _dte[0].tipoDoc === "03" ? "dte03" : "dte01";
-  const filename = factura.replace("-26-", "-");
+  const filename = numeroControl(factura);
   const filePdf = filename + ".pdf";
   const filePath = `../backend/storage/pdf/${empresa[0].esquemaBD}/${dir}/${_ano}/`;
 
