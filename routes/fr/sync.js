@@ -1,13 +1,18 @@
 // Sincronizacion de la handheld. Exige el token de POST /fr/mobile/login
 // (header Authorization: Bearer <token>) y rol RUTA. Las rutas salen de la
 // handheld del token (RUTA_ASIGNADA_RT), no de la URL.
-// Queda como GET /fr/sync/clientes, /articulos y /cobros.
+// Queda como GET /fr/sync/clientes, /articulos, /cobros y /consecutivos.
 
 const { Router } = require("express");
 const compression = require("compression");
 const mobileSession = require("../../middleware/mobileSession");
 const checkRol = require("../../middleware/rol");
-const { getSyncClientes, getSyncArticulos, getSyncCobros } = require("../../controllers/fr/sync");
+const {
+  getSyncClientes,
+  getSyncArticulos,
+  getSyncCobros,
+  getSyncConsecutivos,
+} = require("../../controllers/fr/sync");
 
 const router = Router();
 
@@ -19,5 +24,6 @@ router.use(mobileSession, checkRol(["RUTA"]));
 router.get("/clientes", getSyncClientes);
 router.get("/articulos", getSyncArticulos);
 router.get("/cobros", getSyncCobros);
+router.get("/consecutivos", getSyncConsecutivos);
 
 module.exports = router;

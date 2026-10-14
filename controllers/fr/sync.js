@@ -31,7 +31,7 @@
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
-const { rutaClienteModel, rutaRtModel } = require("../../models");
+const { rutaClienteModel, rutaRtModel, rutaConsecutRtModel } = require("../../models");
 
 // SQL Server limita los parametros por consulta (~2100): las listas largas se consultan por lotes.
 const porLotes = async (lista, consulta, tamano = 500) => {
@@ -255,4 +255,44 @@ const getSyncCobros = async (req, res) => {
   }
 };
 
-module.exports = { getSyncClientes, getSyncArticulos, getSyncCobros };
+//
+// GET /fr/sync/consecutivos   (header Authorization: Bearer <token movil>)
+// Solo los consecutivos de las rutas de la handheld del token.
+//
+// Tabla: erpadmin.RUTA_CONSECUT_RT (consecutivos/NCF/DTE por ruta, relacion 1:1 con RUTA_RT).
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     consecutivos: [{ RUTA, COMPANIA, PEDIDO, RECIBO, DEVOLUCION, FACTURA, ... }] -> RUTA_CONSECUT_RT
+//   }
+// }
+//
+// Nota: una ruta de la handheld sin configuracion en RUTA_CONSECUT_RT simplemente no viene.
+
+const getSyncConsecutivos = async (req, res) => {
+  try {
+    const consecutivos = await rutaConsecutRtModel.findAll({
+      where: { RUTA: req.mobile.codigosRuta },
+      order: [["RUTA", "ASC"]],
+      raw: true,
+    });
+
+    res.send({
+      result: { consecutivos },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de consecutivos"],
+    });
+  }
+};
+
+module.exports = { getSyncClientes, getSyncArticulos, getSyncCobros, getSyncConsecutivos };
