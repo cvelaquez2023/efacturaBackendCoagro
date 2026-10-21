@@ -15,6 +15,8 @@ const { emailRechazo, emailEnviado } = require("../../utils/email");
 const fs = require("fs");
 const path = require("path");
 const { transporter } = require("../../config/mailer");
+const logger = require("../../utils/logger");
+const { notifyError } = require("../../utils/errorNotifier");
 const {
   guardarIdentificacion,
   guardarEmision,

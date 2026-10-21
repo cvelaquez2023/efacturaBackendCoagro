@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Factura Electrónica COAGRO</title>
+  <title>Documento Tributario Electrónico</title>
   <style>
     * {
       box-sizing: border-box;
@@ -218,7 +218,8 @@
       <tr>
         <td>
           <div class="section-title">DATOS DEL EMISOR</div>
-          <div class="row-text"><span class="label">Emisor:</span> {{products.nombreEmisor}}</div>
+          <div class="row-text"><span class="label">Razón Social:</span> {{products.nombreEmisor}}</div>
+          <div class="row-text"><span class="label">Nombre Comercial:</span> {{products.nombreComercialEmisor}}</div>
           <div class="row-text"><span class="label">NIT:</span> {{products.nitEmisor}} &nbsp;|&nbsp; <span class="label">NRC:</span> {{products.nrcEmisor}}</div>
           <div class="row-text"><span class="label">Actividad Económica:</span></div>
           <div class="row-text">{{products.actividadEmisor}}</div>
@@ -296,7 +297,7 @@
           <div class="row-text"><span class="label">FECHA DE PAGO:</span> {{products.fechaPago}}</div>
           <div class="row-text" style="margin-top: 3px;">1. No se aceptan devoluciones después de 15 días de recepción del pedido.</div>
           <div class="row-text">2. Para la devolución, los productos deberán encontrarse completos, sellados y sin alteraciones.</div>
-          <div class="row-text">3. Pagos con cheque, favor elaborar a nombre de Comercial Agropecuaria, S.A. de C.V.</div>
+          <div class="row-text">3. Pagos con cheque, favor elaborar a nombre de {{products.nombreEmisor}}</div>
           <div class="row-text">4. Todo cheque rechazado, generará un cargo administrativo de $25.00 más IVA.</div>
           <div class="row-text">5. Productos que hayan sido aceptados por ofertas especiales o por vencimiento corto no serán aceptados en devolución.</div>
         </td>
@@ -330,7 +331,7 @@
     <div>
       <div class="section-title">PAGARÉ SIN PROTESTO</div>
       <div class="pagare-text">
-        Por medio del presente PAGARÉ yo, {{products.nombre}}, con DUI ó NIT {{products.nit}} me obligo a pagar incondicionalmente, a la orden de Comercial Agropecuaria, Sociedad Anónima de Capital Variable, que se abrevia COAGRO, S.A. DE C.V., la cantidad de: ${{products.totalPagar}} dólares de los Estados Unidos de América el día estipulado según Fecha de Pago en el presente documento a una tasa de interés mensual del 1.5%. Tasa se aplicará a partir del vencimiento del plazo de crédito otorgado. El DEUDOR pagará todas las sumas aquí establecidas incluyendo los intereses moratorios generados sin necesidad de requerimiento previo. El presente pagaré se suscribe en la Ciudad de San Salvador, San Salvador Centro, el {{products.fechaHoraGeneracion}}.
+        Por medio del presente PAGARÉ yo, {{products.nombre}}, con DUI ó NIT {{products.nit}} me obligo a pagar incondicionalmente, a la orden de {{products.nombreEmisor}}{{#if products.aliasDistintoEmisor}}, que se abrevia {{products.nombreComercialEmisor}}{{/if}}, la cantidad de: ${{products.totalPagar}} dólares de los Estados Unidos de América el día estipulado según Fecha de Pago en el presente documento a una tasa de interés mensual del 1.5%. Tasa se aplicará a partir del vencimiento del plazo de crédito otorgado. El DEUDOR pagará todas las sumas aquí establecidas incluyendo los intereses moratorios generados sin necesidad de requerimiento previo. El presente pagaré se suscribe en la Ciudad de San Salvador, San Salvador Centro, el {{products.fechaHoraGeneracion}}.
       </div>
     </div>
 

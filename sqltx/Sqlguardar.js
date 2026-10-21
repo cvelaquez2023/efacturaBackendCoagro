@@ -85,10 +85,11 @@ const guardarEmision = async (emisor, factura,empresa) => {
     tipoEstablecimiento = emisor.tipoEstablecimiento;
   }
 
-  if (emisor.nombreComercial === undefined) {
-    nombreComercial = null;
+  // Sin nombre comercial se guarda NULL de SQL, no el texto 'null'.
+  if (!emisor.nombreComercial) {
+    nombreComercial = "NULL";
   } else {
-    nombreComercial = emisor.nombreComercial;
+    nombreComercial = `'${emisor.nombreComercial}'`;
   }
   if (emisor.codEstableMH === undefined) {
     codEstableMH = null;
@@ -113,7 +114,7 @@ const guardarEmision = async (emisor, factura,empresa) => {
 
   try {
     await sequelize.query(
-      `insert into dte.dbo.emisor(dte_id,nit,nrc,nombre,codActividad,descActividad,nombreComercial,tipoEstablecimiento,direccion_depa,direccion_muni,direccion_compl,telefono,correo,codEstableMH,codEstable,codPuntoVentaMH,codPuntoVenta) values(${id[0].Dte_id},'${emisor.nit}','${emisor.nrc}','${emisor.nombre}','${emisor.codActividad}','${emisor.descActividad}','${nombreComercial}','${tipoEstablecimiento}','${emisor.direccion.departamento}','${emisor.direccion.municipio}','${emisor.direccion.complemento}','${emisor.telefono}','${emisor.correo}','${codEstableMH}','${codEstable}','${codPuntoVentaMH}','${codPuntoVenta}')`,
+      `insert into dte.dbo.emisor(dte_id,nit,nrc,nombre,codActividad,descActividad,nombreComercial,tipoEstablecimiento,direccion_depa,direccion_muni,direccion_compl,telefono,correo,codEstableMH,codEstable,codPuntoVentaMH,codPuntoVenta) values(${id[0].Dte_id},'${emisor.nit}','${emisor.nrc}','${emisor.nombre}','${emisor.codActividad}','${emisor.descActividad}',${nombreComercial},'${tipoEstablecimiento}','${emisor.direccion.departamento}','${emisor.direccion.municipio}','${emisor.direccion.complemento}','${emisor.telefono}','${emisor.correo}','${codEstableMH}','${codEstable}','${codPuntoVentaMH}','${codPuntoVenta}')`,
       { type: QueryTypes.SELECT }
     );
   } catch (error) {

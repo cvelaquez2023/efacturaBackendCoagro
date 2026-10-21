@@ -16,6 +16,8 @@ const moment = require("moment");
 const { sequelize } = require("../../config/mssql");
 const { QueryTypes } = require("sequelize");
 const { NumeroLetras } = require("../../config/letrasNumeros");
+const logger = require("../../utils/logger");
+const { notifyError } = require("../../utils/errorNotifier");
 const {
   guardarDte,
   guardarIdentificacion,

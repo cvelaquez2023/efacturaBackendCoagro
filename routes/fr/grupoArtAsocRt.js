@@ -8,8 +8,11 @@ const {
 
 const router = express.Router();
 
-router.get("/", getGrupoArtAsocRt);
-router.post("/", postGrupoArtAsocRt);
-router.delete("/:grupoArticulo/:articulo", deleteGrupoArtAsocRt);
+const authMiddleware = require("../../middleware/session");
+const checkRol = require("../../middleware/rol");
+
+router.get("/", authMiddleware, checkRol(["Admin", "Fr"]), getGrupoArtAsocRt);
+router.post("/", authMiddleware, checkRol(["Admin", "Fr"]), postGrupoArtAsocRt);
+router.delete("/:grupoArticulo/:articulo", authMiddleware, checkRol(["Admin", "Fr"]), deleteGrupoArtAsocRt);
 
 module.exports = router;

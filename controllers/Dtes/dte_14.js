@@ -8,6 +8,8 @@ const {
   firmaMH,
   autorizacionMh,
 } = require("../../config/MH");
+const logger = require("../../utils/logger");
+const { notifyError } = require("../../utils/errorNotifier");
 const {
   Sqlempresa,
   SqlDocumentoCPDte14,
