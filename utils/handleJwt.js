@@ -20,9 +20,10 @@ const tokenSign = async (user) => {
 };
 // Token de la app movil (handheld). Dura mas que el web porque la app trabaja
 // dias sin conexion y solo lo usa al sincronizar. `tipo: "mobile"` evita que
-// un token web se use en la sync y viceversa.
+// un token web se use en la sync y viceversa. `firma` es el identificador del
+// equipo: mobileSession lo compara con HANDHELD_RT.FIRMA en cada request.
 const MOBILE_TOKEN_EXPIRES = process.env.MOBILE_TOKEN_EXPIRES || "30d";
-const tokenSignMobile = async (user, handheld) => {
+const tokenSignMobile = async (user, handheld, firma) => {
   const sign = jwt.sign(
     {
       tipo: "mobile",
@@ -32,6 +33,7 @@ const tokenSignMobile = async (user, handheld) => {
       rol: user.rol,
       empresa: user.empresa,
       handheld,
+      firma,
     },
     JWT_SECRET,
     {

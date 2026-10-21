@@ -18,6 +18,10 @@
 //     rutaOrden:   [{ RUTA, CLIENTE, DIA, ORDEN }],                 -> alFAC_RUTA_ORDEN
 //     ubicaciones: [],                                              -> CLIENTE_UBICACION (sin fuente)
 //     efectividades: [{ EFECT_VISITA, DESCRIPCION }]                -> EFECT_VISITA_RT (estados de visita)
+//     clientesCia: [{ COD_CIA, COD_CLT, COD_TIP_CL, NOM_CTO, NUM_TEL, LIM_CRE, DIA_CRE, LST_PRE,
+//                     POR_EXC_VT, POR_EXC_CS, IND_MON, DESCUENTO }], -> CINCOH.CLIENTE + CONDICION_PAGO
+//     tiposCliente:  [{ COD_CIA, COD_TIP_CL, DES_TIP_CL }]          -> CINCOH.CATEGORIA_CLIENTE
+//     nivelesPrecio: [{ NIVEL_PRECIO, COMPANIA, LISTA, MONEDA }]    -> CINCOH.NIVEL_PRECIO
 //   }
 // }
 //
@@ -28,10 +32,38 @@
 //  - Una asignación cuyo cliente no existe en erpadmin.cliente (p. ej. "CLI01") no se envía.
 //  - Las rutas salen con código y nombre ("001 - VBV"); sin nombre en rutaRt, solo el código.
 //  - Las ubicaciones (GPS) vivían en CLIENTE_RT, que ya no se consulta: se envía lista vacía.
+//  - clientesCia, tiposCliente y nivelesPrecio salen directo del ERP (schema CINCOH): las tablas
+//    de la handheld (erpadmin.CLIENTE_CIA y erpadmin.NIVEL_LISTA) estan vacias. Los campos se
+//    renombran al formato de la handheld (ver CAMPOS_CLIENTE_CIA). COD_CIA/COMPANIA = "CINCOH".
+//  - clientesCia: solo de los COD_CLT que van en `clientes` (CINCOH.CLIENTE.CLIENTE), uno por cliente.
+//  - LST_PRE/LISTA: el ERP identifica el nivel de precio por nombre (NIVEL_PRECIO + MONEDA), no
+//    por numero. LISTA se genera aqui: 1, 2, 3... ordenando CINCOH.NIVEL_PRECIO por nombre y
+//    moneda, y LST_PRE es la LISTA del (NIVEL_PRECIO, MONEDA_NIVEL) del cliente. El numero solo
+//    vale dentro de la misma sincronizacion (si se agrega un nivel, se recorren); para algo
+//    permanente usar el nombre NIVEL_PRECIO.
+//  - tiposCliente y nivelesPrecio son catálogos completos (no dependen de la ruta).
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
 const { rutaClienteModel, rutaRtModel, rutaConsecutRtModel } = require("../../models");
+
+// Compania del ERP (schema CINCOH), mismo valor que COD_CIA en las tablas erpadmin.
+const CIA_ERP = "CINCOH";
+
+// CINCOH.CLIENTE (c) + CONDICION_PAGO (cp) con los nombres de la handheld (erpadmin.CLIENTE_CIA).
+// NIVEL_PRECIO se usa para calcular LST_PRE y no se envia.
+const CAMPOS_CLIENTE_CIA = `'${CIA_ERP}' AS COD_CIA,
+  c.CLIENTE AS COD_CLT,
+  c.CATEGORIA_CLIENTE AS COD_TIP_CL,
+  c.CONTACTO AS NOM_CTO,
+  c.TELEFONO1 AS NUM_TEL,
+  c.LIMITE_CREDITO AS LIM_CRE,
+  ISNULL(cp.DIAS_NETO, 0) AS DIA_CRE,
+  c.EXENCION_IMP1 AS POR_EXC_VT,
+  c.EXENCION_IMP2 AS POR_EXC_CS,
+  c.MONEDA_NIVEL AS IND_MON,
+  c.DESCUENTO AS DESCUENTO,
+  c.NIVEL_PRECIO AS NIVEL_PRECIO`;
 
 // SQL Server limita los parametros por consulta (~2100): las listas largas se consultan por lotes.
 const porLotes = async (lista, consulta, tamano = 500) => {
@@ -117,13 +149,61 @@ const getSyncClientes = async (req, res) => {
     });
 
     // 5) Estados de visita (erpadmin.EFECT_VISITA_RT): alimentan el combo Estado del registro de visita.
-    const efectividades = await sequelize.query(
-      `SELECT EFECT_VISITA, DESCRIPCION FROM COAGRO2.erpadmin.EFECT_VISITA_RT ORDER BY EFECT_VISITA`,
-      { type: QueryTypes.SELECT }
-    );
+    // 6) Datos comerciales de los clientes enviados (CINCOH.CLIENTE + CONDICION_PAGO), por lotes.
+    // 7) Catalogos de tipos de cliente (CINCOH.CATEGORIA_CLIENTE) y niveles de precio (CINCOH.NIVEL_PRECIO).
+    const codigosCliente = [...new Set(clientes.map((c) => c.COD_CLT))];
+    const [efectividades, ciaRows, tiposCliente, niveles] = await Promise.all([
+      sequelize.query(
+        `SELECT EFECT_VISITA, DESCRIPCION FROM COAGRO2.erpadmin.EFECT_VISITA_RT ORDER BY EFECT_VISITA`,
+        { type: QueryTypes.SELECT }
+      ),
+      porLotes(codigosCliente, (lote) =>
+        sequelize.query(
+          `SELECT ${CAMPOS_CLIENTE_CIA}
+             FROM COAGRO2.CINCOH.CLIENTE c
+             LEFT JOIN COAGRO2.CINCOH.CONDICION_PAGO cp ON cp.CONDICION_PAGO = c.CONDICION_PAGO
+            WHERE c.CLIENTE IN (:lote)
+            ORDER BY c.CLIENTE`,
+          { replacements: { lote }, type: QueryTypes.SELECT }
+        )
+      ),
+      sequelize.query(
+        `SELECT '${CIA_ERP}' AS COD_CIA, CATEGORIA_CLIENTE AS COD_TIP_CL, DESCRIPCION AS DES_TIP_CL
+           FROM COAGRO2.CINCOH.CATEGORIA_CLIENTE
+          ORDER BY CATEGORIA_CLIENTE`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT NIVEL_PRECIO, MONEDA FROM COAGRO2.CINCOH.NIVEL_PRECIO ORDER BY NIVEL_PRECIO, MONEDA`,
+        { type: QueryTypes.SELECT }
+      ),
+    ]);
+
+    // LISTA numerada por (NIVEL_PRECIO, MONEDA); LST_PRE es la del nivel del cliente.
+    const clave = (nivel, moneda) => `${String(nivel ?? "").trim()}|${String(moneda ?? "").trim()}`;
+    const nivelesPrecio = niveles.map((n, i) => ({
+      NIVEL_PRECIO: n.NIVEL_PRECIO,
+      COMPANIA: CIA_ERP,
+      LISTA: i + 1,
+      MONEDA: n.MONEDA,
+    }));
+    const listaDeNivel = new Map(nivelesPrecio.map((n) => [clave(n.NIVEL_PRECIO, n.MONEDA), n.LISTA]));
+    const clientesCia = ciaRows.map(({ NIVEL_PRECIO, ...c }) => ({
+      ...c,
+      LST_PRE: listaDeNivel.get(clave(NIVEL_PRECIO, c.IND_MON)) ?? null,
+    }));
 
     res.send({
-      result: { rutas, clientes, rutaOrden, ubicaciones: [], efectividades },
+      result: {
+        rutas,
+        clientes,
+        rutaOrden,
+        ubicaciones: [],
+        efectividades,
+        clientesCia,
+        tiposCliente,
+        nivelesPrecio,
+      },
       success: true,
       errors: [],
     });
@@ -142,23 +222,31 @@ const getSyncClientes = async (req, res) => {
 // Solo los grupos de articulo y bodegas de las rutas de la handheld del token.
 //
 // Tablas:
-//   - erpadmin.RUTA_ASIGNADA_RT     -> de la ruta salen GRUPO_ARTICULO y BODEGA
+//   - erpadmin.RUTA_ASIGNADA_RT     -> de la ruta salen GRUPO_ARTICULO y BODEGA (codigo de ruteo)
+//   - erpadmin.BODEGA_ASOC_RT       -> traduce el codigo de ruteo a la bodega del ERP (BODEGA_ERP)
 //   - erpadmin.ARTICULO             -> catalogo de articulos (se filtra por GRP_ART)
-//   - erpadmin.ARTICULO_EXISTENCIA  -> existencia por articulo y bodega (se filtra por BODEGA)
+//   - erpadmin.ARTICULO_EXISTENCIA  -> existencia por articulo y bodega del ERP (se filtra por BODEGA_ERP)
 //
 // Respuesta:
 // {
 //   success: true,
 //   errors: [],
 //   result: {
+//     rutas:       [{ RUTA, GRUPO_ARTICULO, BODEGA, BODEGA_ERP }],   -> que grupo y bodega usa cada ruta
 //     articulos:   [{ GRP_ART, COD_ART, COD_CIA, DES_ART, ... }],    -> ARTICULO
-//     existencias: [{ ARTICULO, COMPANIA, BODEGA, EXISTENCIA }],     -> ARTICULO_EXISTENCIA
+//     existencias: [{ ARTICULO, COMPANIA, BODEGA, EXISTENCIA }],     -> ARTICULO_EXISTENCIA (BODEGA = bodega del ERP)
 //   }
 // }
 //
 // Notas:
+//  - articulos y existencias traen los datos de TODAS las rutas de la handheld. Para la ruta
+//    con la que se trabaja, la handheld filtra con su fila de `rutas`:
+//      articulos   -> GRP_ART = rutas[i].GRUPO_ARTICULO
+//      existencias -> BODEGA  = rutas[i].BODEGA_ERP
+//    Sin ese filtro se mezclarian productos y existencias de otras rutas.
 //  - La handheld une las dos listas por ARTICULO_EXISTENCIA.ARTICULO = ARTICULO.COD_ART.
 //  - Solo se envian existencias de articulos que vienen en `articulos`.
+//  - Una ruta cuyo codigo de bodega no esta en BODEGA_ASOC_RT sale con BODEGA_ERP null y sin existencias.
 
 const CAMPOS_ARTICULO = `GRP_ART, COD_ART, COD_CIA, UND_EMP, EMP_ALM, EMP_DET, COD_BAR, DES_ART,
   COD_FAM, COD_CLS, IMPUESTO, USA_LOTES, COSTO_LOCAL, COSTO_DOLAR, FACTOR_PRECIO, ORDEN_ART,
@@ -168,9 +256,16 @@ const CAMPOS_ARTICULO = `GRP_ART, COD_ART, COD_CIA, UND_EMP, EMP_ALM, EMP_DET, C
 
 const getSyncArticulos = async (req, res) => {
   try {
-    // 1) Grupos de articulo y bodegas de las rutas de la handheld (ya resueltas por mobileSession)
-    const grupos = [...new Set(req.mobile.rutas.map((r) => String(r.GRUPO_ARTICULO).trim()))];
-    const bodegas = [...new Set(req.mobile.rutas.map((r) => String(r.BODEGA).trim()))];
+    // 1) Grupo de articulo y bodega de cada ruta de la handheld (ya resueltas por mobileSession)
+    const rutas = req.mobile.rutas.map((r) => ({
+      RUTA: String(r.RUTA).trim(),
+      GRUPO_ARTICULO: String(r.GRUPO_ARTICULO).trim(),
+      BODEGA: String(r.BODEGA).trim(),
+      BODEGA_ERP: r.BODEGA_ERP == null ? null : String(r.BODEGA_ERP).trim(),
+    }));
+    const grupos = [...new Set(rutas.map((r) => r.GRUPO_ARTICULO))];
+    // ARTICULO_EXISTENCIA usa la bodega del ERP, no el codigo de ruteo.
+    const bodegas = [...new Set(rutas.map((r) => r.BODEGA_ERP).filter(Boolean))];
 
     // 2) Articulos de esos grupos
     const articulos = await sequelize.query(
@@ -182,18 +277,20 @@ const getSyncArticulos = async (req, res) => {
     );
 
     // 3) Existencias de esas bodegas, solo de los articulos enviados
-    const existenciasRows = await sequelize.query(
-      `SELECT ARTICULO, COMPANIA, BODEGA, EXISTENCIA
-         FROM COAGRO2.erpadmin.ARTICULO_EXISTENCIA
-        WHERE BODEGA IN (:bodegas)
-        ORDER BY BODEGA, ARTICULO`,
-      { replacements: { bodegas }, type: QueryTypes.SELECT }
-    );
+    const existenciasRows = bodegas.length
+      ? await sequelize.query(
+          `SELECT ARTICULO, COMPANIA, BODEGA, EXISTENCIA
+             FROM COAGRO2.erpadmin.ARTICULO_EXISTENCIA
+            WHERE BODEGA IN (:bodegas)
+            ORDER BY BODEGA, ARTICULO`,
+          { replacements: { bodegas }, type: QueryTypes.SELECT }
+        )
+      : [];
     const codigos = new Set(articulos.map((a) => String(a.COD_ART).trim()));
     const existencias = existenciasRows.filter((e) => codigos.has(String(e.ARTICULO).trim()));
 
     res.send({
-      result: { articulos, existencias },
+      result: { rutas, articulos, existencias },
       success: true,
       errors: [],
     });

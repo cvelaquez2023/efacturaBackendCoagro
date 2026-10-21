@@ -11,9 +11,9 @@ const { resolverHandheld } = require("../utils/handheldMobile");
  * que en la web (authMiddleware + checkRol).
  *
  * Cada request vuelve a validar contra la BD que el usuario siga activo y
- * aprobado, y que la handheld siga teniendo rutas asignadas: si el Admin
- * desactiva al usuario o le quita la ruta a la handheld, la sync se corta
- * aunque el token no haya vencido.
+ * aprobado, que la handheld siga ligada a la firma del equipo del token y que
+ * siga teniendo rutas asignadas: si el Admin desactiva al usuario, libera la
+ * handheld o le quita la ruta, la sync se corta aunque el token no haya vencido.
  *
  * Responde 401 cuando la app debe volver a hacer login. Deja en req:
  *   cliente: [usuario]                                (mismo formato que authMiddleware, para checkRol)
@@ -41,7 +41,9 @@ const mobileSession = async (req, res, next) => {
       return noAutorizado(res, "El usuario ya no tiene acceso a la app de rutas");
     }
 
-    const hh = await resolverHandheld(dataToken.handheld);
+    // La firma del token debe seguir siendo la de la handheld: si el Admin la libera
+    // o la vincula a otro equipo, este token deja de servir (401 -> la app hace login).
+    const hh = await resolverHandheld(dataToken.handheld, { firma: dataToken.firma });
     if (hh.error) return noAutorizado(res, hh.error);
 
     req.cliente = [usuario];

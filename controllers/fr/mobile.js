@@ -14,6 +14,11 @@
 //
 // Cualquier usuario RUTA aprobado puede entrar en cualquier handheld: la ruta
 // sale de la handheld (RUTA_ASIGNADA_RT), no del usuario.
+//
+// Lo que se protege es el EQUIPO: registro y login exigen `firma` (identificador
+// del dispositivo). La primera vez la handheld queda ligada a esa firma
+// (HANDHELD_RT.FIRMA) y despues solo ese equipo puede usarla. Para cambiar de
+// equipo el Admin la libera: PUT /fr/handheldRt/:handheld/liberar.
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
@@ -30,17 +35,18 @@ const PASSWORD_MIN = 6;
 const error = (res, mensaje) => res.send({ result: {}, success: false, errors: [mensaje] });
 
 // POST /fr/mobile/registro
-// { email, nombres, password, handheld }
+// { email, nombres, password, handheld, firma }
 // Crea el usuario PENDIENTE de aprobacion. La handheld se valida para que solo
-// un equipo configurado con un codigo real pueda registrar usuarios.
+// un equipo configurado con un codigo real pueda registrar usuarios, y si aun
+// no tiene firma queda ligada a la de este equipo.
 const postRegistro = async (req, res) => {
   try {
     const email = String(req.body.email || "").trim();
     const nombres = String(req.body.nombres || "").trim();
     const password = String(req.body.password || "");
 
-    if (!email || !nombres || !password || !req.body.handheld) {
-      return error(res, "Los campos email, nombres, password y handheld son obligatorios");
+    if (!email || !nombres || !password || !req.body.handheld || !req.body.firma) {
+      return error(res, "Los campos email, nombres, password, handheld y firma son obligatorios");
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 250) {
       return error(res, "El email no es valido");
@@ -50,14 +56,15 @@ const postRegistro = async (req, res) => {
       return error(res, `La contrasena debe tener al menos ${PASSWORD_MIN} caracteres`);
     }
 
-    const hh = await resolverHandheld(req.body.handheld);
-    if (hh.error) return error(res, hh.error);
-
     const [existe] = await sequelize.query(
       `SELECT usuario_id FROM dte.dbo.usuario WHERE UPPER(email) = UPPER(:email) AND empresa = :empresa`,
       { replacements: { email, empresa: EMPRESA_MOBILE }, type: QueryTypes.SELECT }
     );
     if (existe) return error(res, "Ese correo ya esta registrado");
+
+    // Al final de las validaciones: si el registro no procede, la handheld no queda ligada.
+    const hh = await resolverHandheld(req.body.handheld, { firma: req.body.firma, vincular: true });
+    if (hh.error) return error(res, hh.error);
 
     await sequelize.query(
       `INSERT INTO dte.dbo.usuario (email, nombres, activo, rol, password, confirm, empresa)
@@ -87,15 +94,16 @@ const postRegistro = async (req, res) => {
 };
 
 // POST /fr/mobile/login
-// { email, password, handheld }
+// { email, password, handheld, firma }
 // Devuelve el token (header Authorization: Bearer <token> en /fr/sync/*), el
-// usuario y las rutas de la handheld para crear la BD local.
+// usuario y las rutas de la handheld para crear la BD local. Si la handheld aun
+// no tiene firma queda ligada a la de este equipo; si es de otro equipo, rechaza.
 const postLogin = async (req, res) => {
   try {
     const email = String(req.body.email || "").trim();
     const password = String(req.body.password || "");
-    if (!email || !password || !req.body.handheld) {
-      return error(res, "Los campos email, password y handheld son obligatorios");
+    if (!email || !password || !req.body.handheld || !req.body.firma) {
+      return error(res, "Los campos email, password, handheld y firma son obligatorios");
     }
 
     const [usuario] = await sequelize.query(
@@ -111,13 +119,13 @@ const postLogin = async (req, res) => {
     if (!usuario.confirm) return error(res, "Tu cuenta esta pendiente de aprobacion por un administrador");
     if (!usuario.activo) return error(res, "Tu usuario esta desactivado");
 
-    const hh = await resolverHandheld(req.body.handheld);
+    const hh = await resolverHandheld(req.body.handheld, { firma: req.body.firma, vincular: true });
     if (hh.error) return error(res, hh.error);
 
     delete usuario.password;
     res.send({
       result: {
-        token: await tokenSignMobile(usuario, hh.handheld.HANDHELD),
+        token: await tokenSignMobile(usuario, hh.handheld.HANDHELD, hh.firma),
         expiraEn: MOBILE_TOKEN_EXPIRES,
         usuario: {
           usuario_id: usuario.usuario_id,
