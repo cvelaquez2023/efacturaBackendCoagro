@@ -567,3 +567,10 @@ SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
 [2026-10-20 14:51:25] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
 [2026-10-20 15:16:12] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
 [2026-10-20 15:21:43] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-10-21 13:53:07] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-10-21 18:21:05] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-10-21 18:25:26] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-10-21 18:28:05] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-10-21 18:30:10] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-10-22 08:37:14] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-10-22 10:54:11] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE

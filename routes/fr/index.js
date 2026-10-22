@@ -12,6 +12,7 @@ router.use(authMiddleware, checkRol(["Admin"]));
 
 router.use("/usuarioMovil", require("./usuarioMovil"));
 router.use("/visita", require("./visita"));
+router.use("/reporteVisita", require("./reporteVisita"));
 router.use("/globalesRuteo", require("./globalesRuteo"));
 router.use("/grupoArticuloRt", require("./grupoArticuloRt"));
 router.use("/handheldRt", require("./handheldRt"));

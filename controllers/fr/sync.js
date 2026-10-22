@@ -18,8 +18,6 @@
 //     rutaOrden:   [{ RUTA, CLIENTE, DIA, ORDEN }],                 -> alFAC_RUTA_ORDEN
 //     ubicaciones: [],                                              -> CLIENTE_UBICACION (sin fuente)
 //     efectividades: [{ EFECT_VISITA, DESCRIPCION }]                -> EFECT_VISITA_RT (estados de visita)
-//     clientesCia: [{ COD_CIA, COD_CLT, COD_TIP_CL, NOM_CTO, NUM_TEL, LIM_CRE, DIA_CRE, LST_PRE,
-//                     POR_EXC_VT, POR_EXC_CS, IND_MON, DESCUENTO }], -> CINCOH.CLIENTE + CONDICION_PAGO
 //     tiposCliente:  [{ COD_CIA, COD_TIP_CL, DES_TIP_CL }]          -> CINCOH.CATEGORIA_CLIENTE
 //     nivelesPrecio: [{ NIVEL_PRECIO, COMPANIA, LISTA, MONEDA }]    -> CINCOH.NIVEL_PRECIO
 //   }
@@ -32,15 +30,10 @@
 //  - Una asignación cuyo cliente no existe en erpadmin.cliente (p. ej. "CLI01") no se envía.
 //  - Las rutas salen con código y nombre ("001 - VBV"); sin nombre en rutaRt, solo el código.
 //  - Las ubicaciones (GPS) vivían en CLIENTE_RT, que ya no se consulta: se envía lista vacía.
-//  - clientesCia, tiposCliente y nivelesPrecio salen directo del ERP (schema CINCOH): las tablas
-//    de la handheld (erpadmin.CLIENTE_CIA y erpadmin.NIVEL_LISTA) estan vacias. Los campos se
-//    renombran al formato de la handheld (ver CAMPOS_CLIENTE_CIA). COD_CIA/COMPANIA = "CINCOH".
-//  - clientesCia: solo de los COD_CLT que van en `clientes` (CINCOH.CLIENTE.CLIENTE), uno por cliente.
-//  - LST_PRE/LISTA: el ERP identifica el nivel de precio por nombre (NIVEL_PRECIO + MONEDA), no
-//    por numero. LISTA se genera aqui: 1, 2, 3... ordenando CINCOH.NIVEL_PRECIO por nombre y
-//    moneda, y LST_PRE es la LISTA del (NIVEL_PRECIO, MONEDA_NIVEL) del cliente. El numero solo
-//    vale dentro de la misma sincronizacion (si se agrega un nivel, se recorren); para algo
-//    permanente usar el nombre NIVEL_PRECIO.
+//  - CLIENTE_CIA se sincroniza aparte en GET /fr/sync/clientesCia.
+//  - tiposCliente y nivelesPrecio salen directo del ERP (schema CINCOH): erpadmin.NIVEL_LISTA esta
+//    vacia. COD_CIA/COMPANIA = "CINCOH". LISTA se genera aqui: 1, 2, 3... ordenando
+//    CINCOH.NIVEL_PRECIO por nombre y moneda; solo vale dentro de la misma sincronizacion.
 //  - tiposCliente y nivelesPrecio son catálogos completos (no dependen de la ruta).
 
 const { QueryTypes } = require("sequelize");
@@ -50,20 +43,12 @@ const { rutaClienteModel, rutaRtModel, rutaConsecutRtModel } = require("../../mo
 // Compania del ERP (schema CINCOH), mismo valor que COD_CIA en las tablas erpadmin.
 const CIA_ERP = "CINCOH";
 
-// CINCOH.CLIENTE (c) + CONDICION_PAGO (cp) con los nombres de la handheld (erpadmin.CLIENTE_CIA).
-// NIVEL_PRECIO se usa para calcular LST_PRE y no se envia.
-const CAMPOS_CLIENTE_CIA = `'${CIA_ERP}' AS COD_CIA,
-  c.CLIENTE AS COD_CLT,
-  c.CATEGORIA_CLIENTE AS COD_TIP_CL,
-  c.CONTACTO AS NOM_CTO,
-  c.TELEFONO1 AS NUM_TEL,
-  c.LIMITE_CREDITO AS LIM_CRE,
-  ISNULL(cp.DIAS_NETO, 0) AS DIA_CRE,
-  c.EXENCION_IMP1 AS POR_EXC_VT,
-  c.EXENCION_IMP2 AS POR_EXC_CS,
-  c.MONEDA_NIVEL AS IND_MON,
-  c.DESCUENTO AS DESCUENTO,
-  c.NIVEL_PRECIO AS NIVEL_PRECIO`;
+// Columnas de erpadmin.CLIENTE_CIA (se envian tal cual a la handheld).
+const CAMPOS_CLIENTE_CIA = `COD_CLT, COD_CIA, LST_PRE, IND_MON, NOM_CTO, NUM_TEL, COD_CND,
+  DIA_CRE, SAL_CRE, LIM_CRE, POR_EXC_VT, POR_EXC_CS, COD_PAIS, COD_TIP_CL, DIR_EMB_DEFAULT,
+  DESCUENTO, BODEGA_CONSIGNA, MULT_MON, ACEPTA_FRACCIONES, TIPO_CONTRIBUYENTE, CONTRIBUYENTE,
+  DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, REGIMEN_TRIB, LOCALIZACION_CONSIGNA, CODIGO,
+  RAZONSOCIAL, USA_MONTO_TOPE, MONTO_TOPE, CATEGORIA_TIPO_NIT, SUBTIPODOC`;
 
 // SQL Server limita los parametros por consulta (~2100): las listas largas se consultan por lotes.
 const porLotes = async (lista, consulta, tamano = 500) => {
@@ -149,23 +134,11 @@ const getSyncClientes = async (req, res) => {
     });
 
     // 5) Estados de visita (erpadmin.EFECT_VISITA_RT): alimentan el combo Estado del registro de visita.
-    // 6) Datos comerciales de los clientes enviados (CINCOH.CLIENTE + CONDICION_PAGO), por lotes.
-    // 7) Catalogos de tipos de cliente (CINCOH.CATEGORIA_CLIENTE) y niveles de precio (CINCOH.NIVEL_PRECIO).
-    const codigosCliente = [...new Set(clientes.map((c) => c.COD_CLT))];
-    const [efectividades, ciaRows, tiposCliente, niveles] = await Promise.all([
+    // 6) Catalogos de tipos de cliente (CINCOH.CATEGORIA_CLIENTE) y niveles de precio (CINCOH.NIVEL_PRECIO).
+    const [efectividades, tiposCliente, niveles] = await Promise.all([
       sequelize.query(
         `SELECT EFECT_VISITA, DESCRIPCION FROM COAGRO2.erpadmin.EFECT_VISITA_RT ORDER BY EFECT_VISITA`,
         { type: QueryTypes.SELECT }
-      ),
-      porLotes(codigosCliente, (lote) =>
-        sequelize.query(
-          `SELECT ${CAMPOS_CLIENTE_CIA}
-             FROM COAGRO2.CINCOH.CLIENTE c
-             LEFT JOIN COAGRO2.CINCOH.CONDICION_PAGO cp ON cp.CONDICION_PAGO = c.CONDICION_PAGO
-            WHERE c.CLIENTE IN (:lote)
-            ORDER BY c.CLIENTE`,
-          { replacements: { lote }, type: QueryTypes.SELECT }
-        )
       ),
       sequelize.query(
         `SELECT '${CIA_ERP}' AS COD_CIA, CATEGORIA_CLIENTE AS COD_TIP_CL, DESCRIPCION AS DES_TIP_CL
@@ -179,18 +152,12 @@ const getSyncClientes = async (req, res) => {
       ),
     ]);
 
-    // LISTA numerada por (NIVEL_PRECIO, MONEDA); LST_PRE es la del nivel del cliente.
-    const clave = (nivel, moneda) => `${String(nivel ?? "").trim()}|${String(moneda ?? "").trim()}`;
+    // LISTA numerada por (NIVEL_PRECIO, MONEDA).
     const nivelesPrecio = niveles.map((n, i) => ({
       NIVEL_PRECIO: n.NIVEL_PRECIO,
       COMPANIA: CIA_ERP,
       LISTA: i + 1,
       MONEDA: n.MONEDA,
-    }));
-    const listaDeNivel = new Map(nivelesPrecio.map((n) => [clave(n.NIVEL_PRECIO, n.MONEDA), n.LISTA]));
-    const clientesCia = ciaRows.map(({ NIVEL_PRECIO, ...c }) => ({
-      ...c,
-      LST_PRE: listaDeNivel.get(clave(NIVEL_PRECIO, c.IND_MON)) ?? null,
     }));
 
     res.send({
@@ -200,7 +167,6 @@ const getSyncClientes = async (req, res) => {
         rutaOrden,
         ubicaciones: [],
         efectividades,
-        clientesCia,
         tiposCliente,
         nivelesPrecio,
       },
@@ -392,4 +358,66 @@ const getSyncConsecutivos = async (req, res) => {
   }
 };
 
-module.exports = { getSyncClientes, getSyncArticulos, getSyncCobros, getSyncConsecutivos };
+//
+// GET /fr/sync/clientesCia   (header Authorization: Bearer <token movil>)
+// Solo los clientes asignados a las rutas de la handheld del token.
+//
+// Tablas:
+//   - rutaCliente           -> que clientes van en las rutas de la handheld
+//   - erpadmin.CLIENTE_CIA  -> datos del cliente por compania (lista de precios, credito, etc.)
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     clientesCia: [{ COD_CLT, COD_CIA, LST_PRE, IND_MON, NOM_CTO, ... }] -> CLIENTE_CIA
+//   }
+// }
+//
+// Nota: las filas salen tal cual de erpadmin.CLIENTE_CIA (ver CAMPOS_CLIENTE_CIA); un cliente
+// con varias companias trae una fila por COD_CIA. La handheld une con los clientes por COD_CLT.
+
+const getSyncClientesCia = async (req, res) => {
+  try {
+    // 1) Clientes asignados a las rutas de la handheld
+    const asignaciones = await rutaClienteModel.findAll({
+      attributes: ["CLIENTE"],
+      where: { RUTA: req.mobile.codigosRuta },
+      raw: true,
+    });
+    const codigos = [...new Set(asignaciones.map((a) => String(a.CLIENTE).trim()))];
+
+    // 2) Sus filas de erpadmin.CLIENTE_CIA, por lotes
+    const clientesCia = await porLotes(codigos, (lote) =>
+      sequelize.query(
+        `SELECT ${CAMPOS_CLIENTE_CIA}
+           FROM COAGRO2.erpadmin.CLIENTE_CIA
+          WHERE COD_CLT IN (:lote)
+          ORDER BY COD_CLT, COD_CIA`,
+        { replacements: { lote }, type: QueryTypes.SELECT }
+      )
+    );
+
+    res.send({
+      result: { clientesCia },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de clientes por compania"],
+    });
+  }
+};
+
+module.exports = {
+  getSyncClientes,
+  getSyncArticulos,
+  getSyncCobros,
+  getSyncConsecutivos,
+  getSyncClientesCia,
+};
