@@ -6,6 +6,7 @@ const {
   postHandheldRt,
   putHandheldRt,
   deleteHandheldRt,
+  putLiberarHandheldRt,
 } = require("../../controllers/fr/handheldRt");
 
 const router = express.Router();
@@ -16,6 +17,7 @@ const checkRol = require("../../middleware/rol");
 router.get("/", authMiddleware, checkRol(["Admin", "Fr"]), getHandheldsRt);
 router.get("/:handheld", authMiddleware, checkRol(["Admin", "Fr"]), getHandheldRt);
 router.post("/", authMiddleware, checkRol(["Admin", "Fr"]), postHandheldRt);
+router.put("/:handheld/liberar", authMiddleware, checkRol(["Admin", "Fr"]), putLiberarHandheldRt);
 router.put("/:handheld", authMiddleware, checkRol(["Admin", "Fr"]), putHandheldRt);
 router.delete("/:handheld", authMiddleware, checkRol(["Admin", "Fr"]), deleteHandheldRt);
 

@@ -82,6 +82,193 @@ SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
     at successSteps (node:internal/deps/undici/undici:6882:27)
     at readAllBytes (node:internal/deps/undici/undici:5807:13)
     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-10-05 20:43:15] [ERROR] [cron] [envioDte] Error general en cron envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+[2026-10-05 20:43:15] [ERROR] [cron] [envioDte] envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+[2026-10-05 20:43:46] [ERROR] [errorNotifier] [sendNotificationEmail] Error al enviar correo de notificacion: connect ETIMEDOUT 142.250.9.108:465
+[2026-10-05 20:44:15] [ERROR] [cron] [envioDte] Error general en cron envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+[2026-10-05 20:44:15] [ERROR] [cron] [envioDte] envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+[2026-10-05 20:45:15] [ERROR] [cron] [envioDte] Error general en cron envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+[2026-10-05 20:45:15] [ERROR] [cron] [envioDte] envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+[2026-10-05 20:45:36] [ERROR] [errorNotifier] [sendNotificationEmail] Error al enviar correo de notificacion: connect ETIMEDOUT 142.250.9.108:465
+[2026-10-05 20:46:15] [ERROR] [cron] [envioDte] Error general en cron envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+[2026-10-05 20:46:15] [ERROR] [cron] [envioDte] envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+[2026-10-05 20:46:36] [ERROR] [errorNotifier] [sendNotificationEmail] Error al enviar correo de notificacion: connect ETIMEDOUT 142.250.9.108:465
+[2026-10-06 21:01:15] [ERROR] [cron] [envioDte] Error general en cron envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:174:32
+    at async ConnectionManager.getConnection (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:197:7)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\sequelize.js:305:26
+    at async enviarDtesPendientes (C:\dev\Coagro\efacturaBackendCoagro\cron\envioDte.js:23:18)
+    at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
+    at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
+    at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
+[2026-10-06 21:01:15] [ERROR] [cron] [envioDte] envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:174:32
+    at async ConnectionManager.getConnection (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:197:7)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\sequelize.js:305:26
+    at async enviarDtesPendientes (C:\dev\Coagro\efacturaBackendCoagro\cron\envioDte.js:23:18)
+    at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
+    at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
+    at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
+[2026-10-06 21:02:15] [ERROR] [cron] [envioDte] Error general en cron envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:174:32
+    at async ConnectionManager.getConnection (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:197:7)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\sequelize.js:305:26
+    at async enviarDtesPendientes (C:\dev\Coagro\efacturaBackendCoagro\cron\envioDte.js:23:18)
+    at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
+    at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
+    at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
+[2026-10-06 21:02:15] [ERROR] [cron] [envioDte] envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:174:32
+    at async ConnectionManager.getConnection (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:197:7)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\sequelize.js:305:26
+    at async enviarDtesPendientes (C:\dev\Coagro\efacturaBackendCoagro\cron\envioDte.js:23:18)
+    at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
+    at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
+    at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
+[2026-10-06 21:03:15] [ERROR] [cron] [envioDte] Error general en cron envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:174:32
+    at async ConnectionManager.getConnection (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:197:7)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\sequelize.js:305:26
+    at async enviarDtesPendientes (C:\dev\Coagro\efacturaBackendCoagro\cron\envioDte.js:23:18)
+    at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
+    at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
+    at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
+[2026-10-06 21:03:15] [ERROR] [cron] [envioDte] envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:174:32
+    at async ConnectionManager.getConnection (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:197:7)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\sequelize.js:305:26
+    at async enviarDtesPendientes (C:\dev\Coagro\efacturaBackendCoagro\cron\envioDte.js:23:18)
+    at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
+    at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
+    at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
+[2026-10-06 21:04:15] [ERROR] [cron] [envioDte] Error general en cron envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:174:32
+    at async ConnectionManager.getConnection (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:197:7)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\sequelize.js:305:26
+    at async enviarDtesPendientes (C:\dev\Coagro\efacturaBackendCoagro\cron\envioDte.js:23:18)
+    at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
+    at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
+    at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
+[2026-10-06 21:04:15] [ERROR] [cron] [envioDte] envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:174:32
+    at async ConnectionManager.getConnection (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:197:7)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\sequelize.js:305:26
+    at async enviarDtesPendientes (C:\dev\Coagro\efacturaBackendCoagro\cron\envioDte.js:23:18)
+    at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
+    at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
+    at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
+[2026-10-06 21:05:15] [ERROR] [cron] [envioDte] Error general en cron envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:174:32
+    at async ConnectionManager.getConnection (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:197:7)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\sequelize.js:305:26
+    at async enviarDtesPendientes (C:\dev\Coagro\efacturaBackendCoagro\cron\envioDte.js:23:18)
+    at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
+    at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
+    at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
+[2026-10-06 21:05:15] [ERROR] [cron] [envioDte] envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:174:32
+    at async ConnectionManager.getConnection (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:197:7)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\sequelize.js:305:26
+    at async enviarDtesPendientes (C:\dev\Coagro\efacturaBackendCoagro\cron\envioDte.js:23:18)
+    at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
+    at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
+    at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
+[2026-10-06 21:06:15] [ERROR] [cron] [envioDte] Error general en cron envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:174:32
+    at async ConnectionManager.getConnection (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:197:7)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\sequelize.js:305:26
+    at async enviarDtesPendientes (C:\dev\Coagro\efacturaBackendCoagro\cron\envioDte.js:23:18)
+    at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
+    at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
+    at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
+[2026-10-06 21:06:15] [ERROR] [cron] [envioDte] envioDte: Failed to connect to 192.168.7.9:1433 in 15000ms
+SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
+    at ConnectionManager.connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\mssql\connection-manager.js:119:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async ConnectionManager._connect (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:222:24)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:174:32
+    at async ConnectionManager.getConnection (C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\dialects\abstract\connection-manager.js:197:7)
+    at async C:\dev\Coagro\efacturaBackendCoagro\node_modules\sequelize\lib\sequelize.js:305:26
+    at async enviarDtesPendientes (C:\dev\Coagro\efacturaBackendCoagro\cron\envioDte.js:23:18)
+    at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
+    at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
+    at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
 [2026-09-30 13:18:04] [ERROR] [reimprimir] [reimprimir] reimprimir: Cannot read properties of undefined (reading 'Dte_Id')
 TypeError: Cannot read properties of undefined (reading 'Dte_Id')
     at generaPdf14 (C:\Dev\EFactura\local\backEndCoagro\utils\generaPdf.js:619:26)

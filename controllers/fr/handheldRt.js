@@ -1,3 +1,5 @@
+const { QueryTypes } = require("sequelize");
+const { sequelize } = require("../../config/mssql");
 const { handheldRtModel } = require("../../models");
 const { getPaginacion, respuestaPaginada } = require("../../utils/paginacion");
 
@@ -110,6 +112,37 @@ const putHandheldRt = async (req, res) => {
   }
 };
 
+// PUT /fr/handheldRt/:handheld/liberar
+// Borra la FIRMA: la handheld deja de estar ligada a su equipo. El token del equipo
+// anterior deja de servir y el proximo equipo que haga registro/login se la queda.
+const putLiberarHandheldRt = async (req, res) => {
+  const { handheld } = req.params;
+  try {
+    // OUTPUT devuelve las filas tocadas (el conteo de Model.update no es confiable en mssql).
+    const filas = await sequelize.query(
+      `UPDATE COAGRO2.erpadmin.HANDHELD_RT SET FIRMA = NULL
+       OUTPUT INSERTED.HANDHELD
+        WHERE HANDHELD = :handheld`,
+      { replacements: { handheld }, type: QueryTypes.SELECT }
+    );
+    if (!filas.length) {
+      return res.send({
+        result: {},
+        success: false,
+        errors: [`No existe el handheld ${handheld}.`],
+      });
+    }
+    res.send({ result: { handheld, firma: null }, success: true, errors: [] });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: parseErrores(error, "Error al liberar el handheld"),
+    });
+  }
+};
+
 const deleteHandheldRt = async (req, res) => {
   const { handheld } = req.params;
   try {
@@ -133,4 +166,5 @@ module.exports = {
   postHandheldRt,
   putHandheldRt,
   deleteHandheldRt,
+  putLiberarHandheldRt,
 };

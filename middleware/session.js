@@ -17,7 +17,8 @@ const authMiddleware = async (req, res, next) => {
 
     const dataToken = await verifyToken(token);
 
-    if (!dataToken.email) {
+    // El token de la app movil solo sirve para /fr/sync (ver middleware/mobileSession.js).
+    if (!dataToken.email || dataToken.tipo === "mobile") {
       return res.send({
         result: {},
         success: false,

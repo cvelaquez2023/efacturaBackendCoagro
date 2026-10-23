@@ -10,6 +10,7 @@ const { toString } = require("qrcode");
 const { sequelize } = require("../config/mssql");
 const { QueryTypes } = require("sequelize");
 const { Sqlempresa } = require("../sqltx/sql");
+const { numeroControl } = require("./numeroControl");
 
 // Logo de la empresa emisora (empresa.logoUrl guarda base64). Sin logo, queda en blanco.
 const getLogoBase64 = (empresa) => {
@@ -63,8 +64,8 @@ const generatePdfWithPuppeteer = async (htmlContent, outputPath) => {
 };
 
 const generaPdf = async (datos, _ano, empresa_id) => {
-  const filename = datos.replace("-26-", "-");
-  const filePdf = datos.replace("-26-", "-") + ".pdf";
+  const filename = numeroControl(datos);
+  const filePdf = numeroControl(datos) + ".pdf";
 
   const empresa = await Sqlempresa(empresa_id);
 
@@ -312,8 +313,8 @@ const generaPdf = async (datos, _ano, empresa_id) => {
   console.log("PDF generado con Puppeteer:", outputPath);
 };
 const generaPdf07 = async (datos, _ano, _empresa_id) => {
-  const filename = datos.replace("-26-", "-");
-  const filePdf = datos.replace("-26-", "-") + ".pdf";
+  const filename = numeroControl(datos);
+  const filePdf = numeroControl(datos) + ".pdf";
   const empresa = await Sqlempresa(empresa_id);
   const _dte = await sequelize.query(
     `select Dte_Id, tipoDoc,  CONVERT(varchar,fechaemision,103) as fecha, CONVERT(varchar,fechaemision,108) as hora,fechaemision ,codigoGeneracion,selloRecibido  from dte.dbo.dtes where  dte='${datos}'`,
@@ -435,8 +436,8 @@ const generaPdf07 = async (datos, _ano, _empresa_id) => {
     });
 };
 const generaPdf05 = async (datos, _ano, _empresa) => {
-  const filename = datos.replace("-26-", "-");
-  const filePdf = datos.replace("-26-", "-") + ".pdf";
+  const filename = numeroControl(datos);
+  const filePdf = numeroControl(datos) + ".pdf";
 
   const empresa = await Sqlempresa(_empresa);
   const _dte = await sequelize.query(
@@ -643,8 +644,8 @@ const generaPdf05 = async (datos, _ano, _empresa) => {
   console.log("PDF DTE-05 generado con Puppeteer:", outputPath);
 };
 const generaPdf14 = async (datos, _ano, _empresa) => {
-  const filename = datos.replace("-26-", "-");
-  const filePdf = datos.replace("-26-", "-") + ".pdf";
+  const filename = numeroControl(datos);
+  const filePdf = numeroControl(datos) + ".pdf";
 
   const empresa = await Sqlempresa(_empresa);
   const _dte = await sequelize.query(
