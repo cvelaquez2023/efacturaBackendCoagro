@@ -82,3 +82,8 @@ SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
     at successSteps (node:internal/deps/undici/undici:6882:27)
     at readAllBytes (node:internal/deps/undici/undici:5807:13)
     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-09-30 13:18:04] [ERROR] [reimprimir] [reimprimir] reimprimir: Cannot read properties of undefined (reading 'Dte_Id')
+TypeError: Cannot read properties of undefined (reading 'Dte_Id')
+    at generaPdf14 (C:\Dev\EFactura\local\backEndCoagro\utils\generaPdf.js:619:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async reimprimir (C:\Dev\EFactura\local\backEndCoagro\controllers\Dtes\reimprimir.js:26:7)
