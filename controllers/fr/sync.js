@@ -14,12 +14,13 @@
 //   result: {
 //     rutas:       [{ RUTA, DESCRIPCION, ACTIVA, PERIODICIDAD }],   -> RUTA_RT
 //     clientes:    [{ COD_ZON, COD_CLT, FEC_PLN, NOM_CLT, DIR_CLT,
-//                     DESGLOSE, TIPO_IMPUESTO, TIPO_TARIFA, PORC_TARIFA }], -> CLIENTE
+//                     DESGLOSE, TIPO_IMPUESTO, TIPO_TARIFA, PORC_TARIFA,
+//                     NIVEL_PRECIO }],                               -> CLIENTE
 //     rutaOrden:   [{ RUTA, CLIENTE, DIA, ORDEN }],                 -> alFAC_RUTA_ORDEN
 //     ubicaciones: [],                                              -> CLIENTE_UBICACION (sin fuente)
 //     efectividades: [{ EFECT_VISITA, DESCRIPCION }]                -> EFECT_VISITA_RT (estados de visita)
-//     tiposCliente:  [{ COD_CIA, COD_TIP_CL, DES_TIP_CL }]          -> CINCOH.CATEGORIA_CLIENTE
-//     nivelesPrecio: [{ NIVEL_PRECIO, COMPANIA, LISTA, MONEDA }]    -> CINCOH.NIVEL_PRECIO
+//     tiposCliente:  [{ COD_CIA, COD_TIP_CL, DES_TIP_CL }]          -> erpadmin.alFAC_TIP_CLT
+//     nivelesPrecio: [{ NIVEL_PRECIO, COMPANIA, LISTA, MONEDA }]    -> erpadmin.NIVEL_LISTA
 //   }
 // }
 //
@@ -31,24 +32,23 @@
 //  - Las rutas salen con código y nombre ("001 - VBV"); sin nombre en rutaRt, solo el código.
 //  - Las ubicaciones (GPS) vivían en CLIENTE_RT, que ya no se consulta: se envía lista vacía.
 //  - CLIENTE_CIA se sincroniza aparte en GET /fr/sync/clientesCia.
-//  - tiposCliente y nivelesPrecio salen directo del ERP (schema CINCOH): erpadmin.NIVEL_LISTA esta
-//    vacia. COD_CIA/COMPANIA = "CINCOH". LISTA se genera aqui: 1, 2, 3... ordenando
-//    CINCOH.NIVEL_PRECIO por nombre y moneda; solo vale dentro de la misma sincronizacion.
+//  - Los endpoints de la handheld solo leen tablas de erpadmin; CINCOH (el ERP) solo sirve para
+//    llenar esas tablas, no se consulta desde aqui.
+//  - NIVEL_PRECIO del cliente sale de erpadmin.cliente.NIVEL_PRECIO (nombre del nivel, tal cual).
+//  - tiposCliente y nivelesPrecio salen tal cual de sus tablas (no se numera ni se transforma nada).
 //  - tiposCliente y nivelesPrecio son catálogos completos (no dependen de la ruta).
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
 const { rutaClienteModel, rutaRtModel, rutaConsecutRtModel } = require("../../models");
 
-// Compania del ERP (schema CINCOH), mismo valor que COD_CIA en las tablas erpadmin.
-const CIA_ERP = "CINCOH";
-
-// Columnas de erpadmin.CLIENTE_CIA (se envian tal cual a la handheld).
+// Columnas de erpadmin.CLIENTE_CIA (se envian tal cual a la handheld). SUBTIPODOC no va aqui:
+// se traduce a codigo en getSyncClientesCia.
 const CAMPOS_CLIENTE_CIA = `COD_CLT, COD_CIA, LST_PRE, IND_MON, NOM_CTO, NUM_TEL, COD_CND,
   DIA_CRE, SAL_CRE, LIM_CRE, POR_EXC_VT, POR_EXC_CS, COD_PAIS, COD_TIP_CL, DIR_EMB_DEFAULT,
   DESCUENTO, BODEGA_CONSIGNA, MULT_MON, ACEPTA_FRACCIONES, TIPO_CONTRIBUYENTE, CONTRIBUYENTE,
   DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, REGIMEN_TRIB, LOCALIZACION_CONSIGNA, CODIGO,
-  RAZONSOCIAL, USA_MONTO_TOPE, MONTO_TOPE, CATEGORIA_TIPO_NIT, SUBTIPODOC`;
+  RAZONSOCIAL, USA_MONTO_TOPE, MONTO_TOPE, CATEGORIA_TIPO_NIT`;
 
 // SQL Server limita los parametros por consulta (~2100): las listas largas se consultan por lotes.
 const porLotes = async (lista, consulta, tamano = 500) => {
@@ -76,7 +76,8 @@ const getSyncClientes = async (req, res) => {
     const codigos = [...new Set(asignaciones.map((a) => String(a.CLIENTE).trim()))];
     const erpRows = await porLotes(codigos, (lote) =>
       sequelize.query(
-        `SELECT COD_CLT, NOM_CLT, DIR_CLT, FEC_PLN, DESGLOSE, TIPO_IMPUESTO, TIPO_TARIFA, PORC_TARIFA
+        `SELECT COD_CLT, NOM_CLT, DIR_CLT, FEC_PLN, DESGLOSE, TIPO_IMPUESTO, TIPO_TARIFA, PORC_TARIFA,
+                NIVEL_PRECIO
            FROM COAGRO2.erpadmin.cliente
           WHERE COD_CLT IN (:lote)`,
         { replacements: { lote }, type: QueryTypes.SELECT }
@@ -113,6 +114,7 @@ const getSyncClientes = async (req, res) => {
         TIPO_IMPUESTO: erp.TIPO_IMPUESTO ?? null,
         TIPO_TARIFA: erp.TIPO_TARIFA ?? null,
         PORC_TARIFA: erp.PORC_TARIFA ?? null,
+        NIVEL_PRECIO: erp.NIVEL_PRECIO ?? null,
       });
     }
 
@@ -134,31 +136,23 @@ const getSyncClientes = async (req, res) => {
     });
 
     // 5) Estados de visita (erpadmin.EFECT_VISITA_RT): alimentan el combo Estado del registro de visita.
-    // 6) Catalogos de tipos de cliente (CINCOH.CATEGORIA_CLIENTE) y niveles de precio (CINCOH.NIVEL_PRECIO).
-    const [efectividades, tiposCliente, niveles] = await Promise.all([
+    // 6) Catalogos de tipos de cliente (erpadmin.alFAC_TIP_CLT) y niveles de precio (erpadmin.NIVEL_LISTA).
+    const [efectividades, tiposCliente, nivelesPrecio] = await Promise.all([
       sequelize.query(
         `SELECT EFECT_VISITA, DESCRIPCION FROM COAGRO2.erpadmin.EFECT_VISITA_RT ORDER BY EFECT_VISITA`,
         { type: QueryTypes.SELECT }
       ),
       sequelize.query(
-        `SELECT '${CIA_ERP}' AS COD_CIA, CATEGORIA_CLIENTE AS COD_TIP_CL, DESCRIPCION AS DES_TIP_CL
-           FROM COAGRO2.CINCOH.CATEGORIA_CLIENTE
-          ORDER BY CATEGORIA_CLIENTE`,
+        `SELECT COD_CIA, COD_TIP_CL, DES_TIP_CL FROM COAGRO2.erpadmin.alFAC_TIP_CLT ORDER BY COD_TIP_CL`,
         { type: QueryTypes.SELECT }
       ),
       sequelize.query(
-        `SELECT NIVEL_PRECIO, MONEDA FROM COAGRO2.CINCOH.NIVEL_PRECIO ORDER BY NIVEL_PRECIO, MONEDA`,
+        `SELECT NIVEL_PRECIO, COMPANIA, LISTA, MONEDA
+           FROM COAGRO2.erpadmin.NIVEL_LISTA
+          ORDER BY NIVEL_PRECIO, MONEDA`,
         { type: QueryTypes.SELECT }
       ),
     ]);
-
-    // LISTA numerada por (NIVEL_PRECIO, MONEDA).
-    const nivelesPrecio = niveles.map((n, i) => ({
-      NIVEL_PRECIO: n.NIVEL_PRECIO,
-      COMPANIA: CIA_ERP,
-      LISTA: i + 1,
-      MONEDA: n.MONEDA,
-    }));
 
     res.send({
       result: {
@@ -192,6 +186,8 @@ const getSyncClientes = async (req, res) => {
 //   - erpadmin.BODEGA_ASOC_RT       -> traduce el codigo de ruteo a la bodega del ERP (BODEGA_ERP)
 //   - erpadmin.ARTICULO             -> catalogo de articulos (se filtra por GRP_ART)
 //   - erpadmin.ARTICULO_EXISTENCIA  -> existencia por articulo y bodega del ERP (se filtra por BODEGA_ERP)
+//   - erpadmin.ARTICULO_PRECIO      -> precio por articulo, nivel de precio y moneda
+//   - erpadmin.IMPUESTO             -> catalogo de impuestos (completo)
 //
 // Respuesta:
 // {
@@ -201,6 +197,12 @@ const getSyncClientes = async (req, res) => {
 //     rutas:       [{ RUTA, GRUPO_ARTICULO, BODEGA, BODEGA_ERP }],   -> que grupo y bodega usa cada ruta
 //     articulos:   [{ GRP_ART, COD_ART, COD_CIA, DES_ART, ... }],    -> ARTICULO
 //     existencias: [{ ARTICULO, COMPANIA, BODEGA, EXISTENCIA }],     -> ARTICULO_EXISTENCIA (BODEGA = bodega del ERP)
+//     precios:     [{ ARTICULO, COMPANIA, NIVEL_PRECIO, MONEDA, PRECIO, MARGEN_UTILIDAD, VERSION,
+//                     VERSION_ARTICULO, FECHA_INICIO_VERSION_ARTICULO,
+//                     FECHA_FINAL_VERSION_ARTICULO }],               -> ARTICULO_PRECIO
+//     impuestos:   [{ COMPANIA, IMPUESTO, IMPUESTO1, IMPUESTO2, TIPO_TARIFA1, TIPO_TARIFA2,
+//                     TIPO_IMPUESTO1, TIPO_IMPUESTO2, USA_IMPUESTO2_CANTIDAD,
+//                     IMPUESTO2_CANTIDAD }],                         -> IMPUESTO
 //   }
 // }
 //
@@ -211,8 +213,12 @@ const getSyncClientes = async (req, res) => {
 //      existencias -> BODEGA  = rutas[i].BODEGA_ERP
 //    Sin ese filtro se mezclarian productos y existencias de otras rutas.
 //  - La handheld une las dos listas por ARTICULO_EXISTENCIA.ARTICULO = ARTICULO.COD_ART.
-//  - Solo se envian existencias de articulos que vienen en `articulos`.
+//  - Solo se envian existencias y precios de articulos que vienen en `articulos`.
+//  - precios trae todos los niveles; la handheld toma el del cliente:
+//      ARTICULO_PRECIO.ARTICULO = ARTICULO.COD_ART AND NIVEL_PRECIO = cliente.NIVEL_PRECIO
 //  - Una ruta cuyo codigo de bodega no esta en BODEGA_ASOC_RT sale con BODEGA_ERP null y sin existencias.
+//  - impuestos es el catalogo completo (no depende de la ruta ni se filtra por compania); la
+//    handheld lo une por ARTICULO.IMPUESTO = IMPUESTO.IMPUESTO.
 
 const CAMPOS_ARTICULO = `GRP_ART, COD_ART, COD_CIA, UND_EMP, EMP_ALM, EMP_DET, COD_BAR, DES_ART,
   COD_FAM, COD_CLS, IMPUESTO, USA_LOTES, COSTO_LOCAL, COSTO_DOLAR, FACTOR_PRECIO, ORDEN_ART,
@@ -255,8 +261,27 @@ const getSyncArticulos = async (req, res) => {
     const codigos = new Set(articulos.map((a) => String(a.COD_ART).trim()));
     const existencias = existenciasRows.filter((e) => codigos.has(String(e.ARTICULO).trim()));
 
+    // 4) Precios de los articulos enviados (todos los niveles y monedas)
+    const precios = await sequelize.query(
+      `SELECT ARTICULO, COMPANIA, NIVEL_PRECIO, MONEDA, PRECIO, MARGEN_UTILIDAD, VERSION,
+              VERSION_ARTICULO, FECHA_INICIO_VERSION_ARTICULO, FECHA_FINAL_VERSION_ARTICULO
+         FROM COAGRO2.erpadmin.ARTICULO_PRECIO
+        WHERE ARTICULO IN (SELECT COD_ART FROM COAGRO2.erpadmin.ARTICULO WHERE GRP_ART IN (:grupos))
+        ORDER BY NIVEL_PRECIO, MONEDA, ARTICULO`,
+      { replacements: { grupos }, type: QueryTypes.SELECT }
+    );
+
+    // 5) Catalogo completo de impuestos
+    const impuestos = await sequelize.query(
+      `SELECT COMPANIA, IMPUESTO, IMPUESTO1, IMPUESTO2, TIPO_TARIFA1, TIPO_TARIFA2,
+              TIPO_IMPUESTO1, TIPO_IMPUESTO2, USA_IMPUESTO2_CANTIDAD, IMPUESTO2_CANTIDAD
+         FROM COAGRO2.erpadmin.IMPUESTO
+        ORDER BY IMPUESTO`,
+      { type: QueryTypes.SELECT }
+    );
+
     res.send({
-      result: { rutas, articulos, existencias },
+      result: { rutas, articulos, existencias, precios, impuestos },
       success: true,
       errors: [],
     });
@@ -266,6 +291,98 @@ const getSyncArticulos = async (req, res) => {
       result: {},
       success: false,
       errors: ["Error al preparar la sincronizacion de articulos"],
+    });
+  }
+};
+
+//
+// GET /fr/sync/precios?cliente=00109   (header Authorization: Bearer <token movil>)
+// Precios de los articulos para el nivel de precio de un cliente (lo que puede ver en el pedido).
+//
+// Tablas:
+//   - erpadmin.RUTA_CLIENTE     -> el cliente debe estar en alguna ruta de la handheld
+//   - erpadmin.cliente          -> NIVEL_PRECIO del cliente
+//   - erpadmin.ARTICULO         -> solo articulos de los grupos (GRP_ART) de las rutas de la handheld
+//   - erpadmin.ARTICULO_PRECIO  -> precios de ese nivel
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     cliente:     "00109",
+//     nivelPrecio: "DISTRIBUIDOR",
+//     precios:     [{ ARTICULO, DES_ART, COMPANIA, NIVEL_PRECIO, MONEDA, PRECIO, MARGEN_UTILIDAD,
+//                     VERSION, VERSION_ARTICULO, FECHA_INICIO_VERSION_ARTICULO,
+//                     FECHA_FINAL_VERSION_ARTICULO }]                  -> ARTICULO_PRECIO
+//   }
+// }
+//
+// Notas:
+//  - Un articulo sin precio en el nivel del cliente no sale (no se puede vender a ese nivel).
+//  - Cliente sin NIVEL_PRECIO en erpadmin.cliente -> error, no se toma otro nivel por defecto.
+
+const getSyncPrecios = async (req, res) => {
+  try {
+    const cliente = String(req.query.cliente || "").trim();
+    if (!cliente) {
+      return res.send({ result: {}, success: false, errors: ["El parametro cliente es obligatorio"] });
+    }
+
+    // 1) El cliente debe pertenecer a alguna ruta de la handheld
+    const asignado = await rutaClienteModel.findOne({
+      where: { RUTA: req.mobile.codigosRuta, CLIENTE: cliente },
+      raw: true,
+    });
+    if (!asignado) {
+      return res.send({
+        result: {},
+        success: false,
+        errors: [`El cliente ${cliente} no esta asignado a las rutas de esta handheld`],
+      });
+    }
+
+    // 2) Nivel de precio del cliente
+    const [erp] = await sequelize.query(
+      `SELECT TOP 1 NIVEL_PRECIO
+         FROM COAGRO2.erpadmin.cliente
+        WHERE COD_CLT = :cliente AND NIVEL_PRECIO IS NOT NULL`,
+      { replacements: { cliente }, type: QueryTypes.SELECT }
+    );
+    const nivelPrecio = erp ? String(erp.NIVEL_PRECIO).trim() : "";
+    if (!nivelPrecio) {
+      return res.send({
+        result: {},
+        success: false,
+        errors: [`El cliente ${cliente} no tiene nivel de precio asignado`],
+      });
+    }
+
+    // 3) Precios de ese nivel, solo de los grupos de articulo de las rutas de la handheld
+    const grupos = [...new Set(req.mobile.rutas.map((r) => String(r.GRUPO_ARTICULO).trim()))];
+    const precios = await sequelize.query(
+      `SELECT AP.ARTICULO, A.DES_ART, AP.COMPANIA, AP.NIVEL_PRECIO, AP.MONEDA, AP.PRECIO,
+              AP.MARGEN_UTILIDAD, AP.VERSION, AP.VERSION_ARTICULO,
+              AP.FECHA_INICIO_VERSION_ARTICULO, AP.FECHA_FINAL_VERSION_ARTICULO
+         FROM COAGRO2.erpadmin.ARTICULO_PRECIO AP
+         CROSS APPLY (SELECT TOP 1 DES_ART, ORDEN_ART FROM COAGRO2.erpadmin.ARTICULO
+                       WHERE COD_ART = AP.ARTICULO AND GRP_ART IN (:grupos)) A
+        WHERE AP.NIVEL_PRECIO = :nivelPrecio
+        ORDER BY A.ORDEN_ART, A.DES_ART`,
+      { replacements: { grupos, nivelPrecio }, type: QueryTypes.SELECT }
+    );
+
+    res.send({
+      result: { cliente, nivelPrecio, precios },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al consultar los precios del cliente"],
     });
   }
 };
@@ -365,18 +482,26 @@ const getSyncConsecutivos = async (req, res) => {
 // Tablas:
 //   - rutaCliente           -> que clientes van en las rutas de la handheld
 //   - erpadmin.CLIENTE_CIA  -> datos del cliente por compania (lista de precios, credito, etc.)
+//   - erpadmin.SUBTIPO_DOC  -> catalogo de subtipos de factura (TIPO = 'FAC')
 //
 // Respuesta:
 // {
 //   success: true,
 //   errors: [],
 //   result: {
-//     clientesCia: [{ COD_CLT, COD_CIA, LST_PRE, IND_MON, NOM_CTO, ... }] -> CLIENTE_CIA
+//     clientesCia: [{ COD_CLT, COD_CIA, LST_PRE, IND_MON, NOM_CTO, ..., SUBTIPODOC }] -> CLIENTE_CIA
+//     subtiposDoc: [{ COMPANIA, TIPO, SUBTIPO, DESCRIPCION }]                         -> SUBTIPO_DOC
 //   }
 // }
 //
-// Nota: las filas salen tal cual de erpadmin.CLIENTE_CIA (ver CAMPOS_CLIENTE_CIA); un cliente
-// con varias companias trae una fila por COD_CIA. La handheld une con los clientes por COD_CLT.
+// Notas:
+//  - Las filas salen tal cual de erpadmin.CLIENTE_CIA (ver CAMPOS_CLIENTE_CIA); un cliente
+//    con varias companias trae una fila por COD_CIA. La handheld une con los clientes por COD_CLT.
+//  - CLIENTE_CIA.SUBTIPODOC guarda la DESCRIPCION del subtipo ("Cont Contribuyente"), no el
+//    codigo. Se traduce al SUBTIPO de SUBTIPO_DOC (TIPO 'FAC') buscando por descripcion, para
+//    que la handheld lo encuentre en subtiposDoc. Sin subtipo o sin coincidencia -> null.
+//  - subtiposDoc es el catalogo completo de 'FAC' (no depende de los clientes de la ruta).
+//    No se filtra por compania: SUBTIPO_DOC usa COMPANIA 'COAGRO' y CLIENTE_CIA 'CINCOH'.
 
 const getSyncClientesCia = async (req, res) => {
   try {
@@ -388,19 +513,32 @@ const getSyncClientesCia = async (req, res) => {
     });
     const codigos = [...new Set(asignaciones.map((a) => String(a.CLIENTE).trim()))];
 
-    // 2) Sus filas de erpadmin.CLIENTE_CIA, por lotes
+    // 2) Sus filas de erpadmin.CLIENTE_CIA, por lotes, con SUBTIPODOC traducido a codigo
     const clientesCia = await porLotes(codigos, (lote) =>
       sequelize.query(
-        `SELECT ${CAMPOS_CLIENTE_CIA}
-           FROM COAGRO2.erpadmin.CLIENTE_CIA
+        `SELECT ${CAMPOS_CLIENTE_CIA}, S.SUBTIPO AS SUBTIPODOC
+           FROM COAGRO2.erpadmin.CLIENTE_CIA CC
+           OUTER APPLY (SELECT TOP 1 SUBTIPO FROM COAGRO2.erpadmin.SUBTIPO_DOC
+                         WHERE TIPO = 'FAC'
+                           AND LTRIM(RTRIM(DESCRIPCION)) = LTRIM(RTRIM(CC.SUBTIPODOC))
+                         ORDER BY SUBTIPO) S
           WHERE COD_CLT IN (:lote)
           ORDER BY COD_CLT, COD_CIA`,
         { replacements: { lote }, type: QueryTypes.SELECT }
       )
     );
 
+    // 3) Catalogo completo de subtipos de factura
+    const subtiposDoc = await sequelize.query(
+      `SELECT COMPANIA, TIPO, SUBTIPO, DESCRIPCION
+         FROM COAGRO2.erpadmin.SUBTIPO_DOC
+        WHERE TIPO = 'FAC'
+        ORDER BY SUBTIPO`,
+      { type: QueryTypes.SELECT }
+    );
+
     res.send({
-      result: { clientesCia },
+      result: { clientesCia, subtiposDoc },
       success: true,
       errors: [],
     });
@@ -420,4 +558,5 @@ module.exports = {
   getSyncCobros,
   getSyncConsecutivos,
   getSyncClientesCia,
+  getSyncPrecios,
 };
