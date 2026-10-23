@@ -581,3 +581,15 @@ SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
 [2026-10-22 15:17:31] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
 [2026-10-22 18:45:49] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
 [2026-10-22 18:49:04] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-09-22 14:34:54] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-09-22 14:44:43] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-09-22 14:51:49] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-09-22 14:57:29] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-09-30 13:05:38] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-09-30 13:06:51] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-09-30 13:18:04] [ERROR] [reimprimir] [reimprimir] reimprimir: Cannot read properties of undefined (reading 'Dte_Id')
+TypeError: Cannot read properties of undefined (reading 'Dte_Id')
+    at generaPdf14 (C:\Dev\EFactura\local\backEndCoagro\utils\generaPdf.js:619:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async reimprimir (C:\Dev\EFactura\local\backEndCoagro\controllers\Dtes\reimprimir.js:26:7)
+[2026-10-09 12:29:57] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE

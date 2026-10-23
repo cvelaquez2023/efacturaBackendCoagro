@@ -269,3 +269,8 @@ SequelizeConnectionError: Failed to connect to 192.168.7.9:1433 in 15000ms
     at async execute (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:272:36)
     at async runTask (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:309:17)
     at async Runner.runCoordinated (C:\dev\Coagro\efacturaBackendCoagro\node_modules\node-cron\dist\_shared.cjs:209:13)
+[2026-09-30 13:18:04] [ERROR] [reimprimir] [reimprimir] reimprimir: Cannot read properties of undefined (reading 'Dte_Id')
+TypeError: Cannot read properties of undefined (reading 'Dte_Id')
+    at generaPdf14 (C:\Dev\EFactura\local\backEndCoagro\utils\generaPdf.js:619:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async reimprimir (C:\Dev\EFactura\local\backEndCoagro\controllers\Dtes\reimprimir.js:26:7)
