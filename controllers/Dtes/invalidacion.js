@@ -58,7 +58,7 @@ const postInvalidar = async (req, res) => {
       version: empresa[0].versionInva,
       ambiente: empresa[0].ambiente,
       codigoGeneracion: _codigoGeneracion,
-      fecAnula: fechaFormateada,
+      fecAnula: datos[0].fecEmi,
       horAnula: horaFormateada,
     };
 
