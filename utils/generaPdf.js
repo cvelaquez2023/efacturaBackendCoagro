@@ -37,6 +37,7 @@ const findChromePath = () => {
   return paths.find((p) => fs.existsSync(p)) || null;
 };
 
+// Sin outputPath no se guarda archivo: devuelve el PDF como Buffer (page.pdf siempre lo devuelve).
 const generatePdfWithPuppeteer = async (htmlContent, outputPath) => {
   const chromePath = findChromePath();
   const launchOptions = { headless: "new" };
@@ -47,7 +48,7 @@ const generatePdfWithPuppeteer = async (htmlContent, outputPath) => {
   try {
     const page = await browser.newPage();
     await page.setContent(htmlContent, { waitUntil: "domcontentloaded" });
-    await page.pdf({
+    return await page.pdf({
       path: outputPath,
       format: "Letter",
       printBackground: true,
@@ -790,4 +791,4 @@ const generaPdf14 = async (datos, _ano, _empresa) => {
   await generatePdfWithPuppeteer(compiledHtml, outputPath);
   console.log("PDF DTE-14 generado con Puppeteer:", outputPath);
 };
-module.exports = { generaPdf, generaPdf07, generaPdf05, generaPdf14 };
+module.exports = { generaPdf, generaPdf07, generaPdf05, generaPdf14, generatePdfWithPuppeteer };

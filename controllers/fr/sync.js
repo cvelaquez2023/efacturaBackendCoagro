@@ -41,6 +41,7 @@
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
 const { rutaClienteModel, rutaRtModel, rutaConsecutRtModel } = require("../../models");
+const { COLUMNAS_ENC, COLUMNAS_DET, FECHAS_ENC } = require("./syncEnviar");
 
 // Columnas de erpadmin.CLIENTE_CIA (se envian tal cual a la handheld). SUBTIPODOC no va aqui:
 // se traduce a codigo en getSyncClientesCia.
@@ -389,35 +390,67 @@ const getSyncPrecios = async (req, res) => {
 
 //
 // GET /fr/sync/cobros   (header Authorization: Bearer <token movil>)
-// Solo los documentos de las rutas de la handheld del token.
+// Todos los documentos de los clientes de las rutas de la handheld (RUTA_CLIENTE), sin importar
+// de que vendedor/ruta sea el documento: alimenta la pantalla de clientes (todo lo que debe el
+// cliente). Lo del vendedor de la handheld (meta diaria) sale de /fr/sync/cobrosAgente.
 //
 // Tabla: erpadmin.alCXC_PEN_COB (documentos de CxC con saldo, por ruta y cliente).
-// PK: (COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT). COD_ZON es la ruta.
+// PK: (COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT). COD_ZON es la ruta del documento.
 //
 // Respuesta:
 // {
 //   success: true,
 //   errors: [],
 //   result: {
-//     documentos: [{ COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT, SALDO_LOCAL, ... }] -> alCXC_PEN_COB
+//     documentos: [{ COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT, AGENTE, NOMBRE_AGENTE, SALDO_LOCAL, ... }] -> alCXC_PEN_COB
 //   }
 // }
 //
-// Nota: la handheld une con los clientes por COD_ZON + COD_CLT.
+// Notas:
+//  - COD_ZON puede ser una ruta de otro vendedor: la handheld debe unir con el cliente solo por
+//    COD_CLT, no por COD_ZON + COD_CLT.
+//  - AGENTE/NOMBRE_AGENTE: agente dueño de la ruta del documento (RUTA_ASIGNADA_RT); null si la ruta no
+//    tiene asignacion activa.
 
 const CAMPOS_PEN_COB = `COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT, SALDO_DOLAR, SALDO_LOCAL,
   MONTO_DOLAR, MONTO_LOCAL, FEC_DOC_FT, FEC_PRO, FEC_VEN, IND_MON, IND_ANL, TIP_CMB_DOL,
   CONDICION_PAGO, SUBTOTAL, TIP_CMB_LOC, CLASE_DOCUMENTO, INCOTERMS, FORMAS_PAGO,
   NATURALEZA_OPERACION, CUFE, CODIGOQR, INDICADOR_FACTURACION`;
 
+// Nombre del agente de la ruta (A = RUTA_ASIGNADA_RT): A.AGENTE es el codigo de ruteo
+// (AGENTE_ASOC_RT.CODIGO) y el nombre vive en AGENTE_RT, por el AGENTE del ERP.
+const JOIN_NOMBRE_AGENTE = `
+  LEFT JOIN COAGRO2.erpadmin.AGENTE_ASOC_RT AA ON AA.CODIGO = A.AGENTE
+  LEFT JOIN COAGRO2.erpadmin.AGENTE_RT AR ON AR.AGENTE = AA.AGENTE`;
+
 const getSyncCobros = async (req, res) => {
   try {
-    const documentos = await sequelize.query(
-      `SELECT ${CAMPOS_PEN_COB}
-         FROM COAGRO2.erpadmin.alCXC_PEN_COB
-        WHERE COD_ZON IN (:rutas)
-        ORDER BY COD_ZON, COD_CLT, FEC_VEN, NUM_DOC`,
-      { replacements: { rutas: req.mobile.codigosRuta }, type: QueryTypes.SELECT }
+    // 1) Clientes asignados a las rutas de la handheld
+    const asignaciones = await rutaClienteModel.findAll({
+      attributes: ["CLIENTE"],
+      where: { RUTA: req.mobile.codigosRuta },
+      raw: true,
+    });
+    const codigos = [...new Set(asignaciones.map((a) => String(a.CLIENTE).trim()))];
+
+    // 2) Todos sus documentos, de cualquier ruta/vendedor, por lotes
+    const documentos = await porLotes(codigos, (lote) =>
+      sequelize.query(
+        `SELECT ${CAMPOS_PEN_COB.replace(/(\w+)/g, "P.$1")}, A.AGENTE, AR.NOMBRE AS NOMBRE_AGENTE
+           FROM COAGRO2.erpadmin.alCXC_PEN_COB P
+           LEFT JOIN COAGRO2.erpadmin.RUTA_ASIGNADA_RT A ON A.RUTA = P.COD_ZON AND A.ACTIVA = 'S'
+           ${JOIN_NOMBRE_AGENTE}
+          WHERE P.COD_CLT IN (:lote)`,
+        { replacements: { lote }, type: QueryTypes.SELECT }
+      )
+    );
+    // El orden se aplica aqui porque los lotes llegan por separado.
+    const texto = (v) => String(v ?? "").trim();
+    documentos.sort(
+      (a, b) =>
+        texto(a.COD_CLT).localeCompare(texto(b.COD_CLT)) ||
+        new Date(a.FEC_VEN) - new Date(b.FEC_VEN) ||
+        texto(a.NUM_DOC).localeCompare(texto(b.NUM_DOC))
     );
 
     res.send({
@@ -431,6 +464,65 @@ const getSyncCobros = async (req, res) => {
       result: {},
       success: false,
       errors: ["Error al preparar la sincronizacion de cobros"],
+    });
+  }
+};
+
+//
+// GET /fr/sync/cobrosAgente   (header Authorization: Bearer <token movil>)
+// Solo los documentos del vendedor de la handheld (calendario de cobros / "mi meta diaria"):
+// el AGENTE que RUTA_ASIGNADA_RT le asigna a sus rutas (ver utils/handheldMobile.js). El agente
+// no se pasa en la URL, sale del token; asi el vendedor 1 solo baja sus facturas. Para todo lo
+// que debe cada cliente (de cualquier vendedor) esta /fr/sync/cobros.
+//
+// Tabla: erpadmin.alCXC_PEN_COB. No tiene columna de agente: el documento es del agente dueño
+// de su ruta (COD_ZON = RUTA_ASIGNADA_RT.RUTA, ACTIVA = 'S'), sin importar en que handheld
+// este esa ruta.
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     agentes:    ["10"],
+//     documentos: [{ COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT, AGENTE, NOMBRE_AGENTE, SALDO_LOCAL, ... }]
+//   }
+// }
+
+const getSyncCobrosAgente = async (req, res) => {
+  try {
+    const agentes = [
+      ...new Set(req.mobile.rutas.map((r) => String(r.AGENTE ?? "").trim()).filter(Boolean)),
+    ];
+    if (!agentes.length) {
+      return res.send({
+        result: {},
+        success: false,
+        errors: [`La handheld ${req.mobile.handheld.HANDHELD} no tiene un agente asignado`],
+      });
+    }
+
+    const documentos = await sequelize.query(
+      `SELECT ${CAMPOS_PEN_COB.replace(/(\w+)/g, "P.$1")}, A.AGENTE, AR.NOMBRE AS NOMBRE_AGENTE
+         FROM COAGRO2.erpadmin.alCXC_PEN_COB P
+         JOIN COAGRO2.erpadmin.RUTA_ASIGNADA_RT A ON A.RUTA = P.COD_ZON AND A.ACTIVA = 'S'
+         ${JOIN_NOMBRE_AGENTE}
+        WHERE A.AGENTE IN (:agentes)
+        ORDER BY P.COD_ZON, P.COD_CLT, P.FEC_VEN, P.NUM_DOC`,
+      { replacements: { agentes }, type: QueryTypes.SELECT }
+    );
+
+    res.send({
+      result: { agentes, documentos },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de cobros del agente"],
     });
   }
 };
@@ -552,10 +644,90 @@ const getSyncClientesCia = async (req, res) => {
   }
 };
 
+//
+// GET /fr/sync/cotizaciones   (header Authorization: Bearer <token movil>)
+// Cotizaciones (TIP_DOC = 'C') de las rutas de la handheld del token, para que el vendedor las
+// pueda aprobar desde la app (se aprueban con aprobaciones[] en POST /fr/sync/enviar).
+//
+// Tablas:
+//   - erpadmin.alFAC_ENC_PED -> encabezados con TIP_DOC = 'C' y COD_ZON en las rutas del token
+//   - erpadmin.alFAC_DET_PED -> sus lineas (unidas por COD_CIA + NUM_PED, TIP_DOC = 'C')
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     cotizaciones: [{ encabezado: { COD_CIA, COD_ZON, NUM_PED, ..., TIP_DOC },   -> COLUMNAS_ENC de syncEnviar.js
+//                      lineas: [{ NUM_LN, COD_ART, ... }] }]                     -> COLUMNAS_DET, por NUM_LN
+//   }
+// }
+//
+// Notas:
+//  - Fechas (HOR_INI, HOR_FIN, FEC_PED, FEC_DES) como texto 'YYYY-MM-DD HH:MM:SS'.
+//  - Textos sin los espacios al final de las columnas char.
+const getSyncCotizaciones = async (req, res) => {
+  try {
+    const columnasEnc = [...COLUMNAS_ENC, "TIP_DOC"].map((c) =>
+      FECHAS_ENC.includes(c) ? `CONVERT(varchar(19), E.${c}, 120) AS ${c}` : `E.${c}`
+    );
+    const limpiar = (fila) =>
+      Object.fromEntries(Object.entries(fila).map(([k, v]) => [k, typeof v === "string" ? v.trim() : v]));
+
+    const encabezados = await porLotes(req.mobile.codigosRuta, (rutas) =>
+      sequelize.query(
+        `SELECT ${columnasEnc.join(", ")}
+           FROM COAGRO2.erpadmin.alFAC_ENC_PED E
+          WHERE E.TIP_DOC = 'C' AND E.COD_ZON IN (:rutas)
+          ORDER BY E.COD_ZON, E.NUM_PED`,
+        { replacements: { rutas }, type: QueryTypes.SELECT }
+      )
+    );
+    // Las lineas se filtran con el mismo criterio que los encabezados (join), asi no se manda
+    // la lista de NUM_PED como parametros.
+    const lineas = await porLotes(req.mobile.codigosRuta, (rutas) =>
+      sequelize.query(
+        `SELECT D.COD_CIA AS _CIA, D.NUM_PED AS _PED, ${COLUMNAS_DET.map((c) => `D.${c}`).join(", ")}
+           FROM COAGRO2.erpadmin.alFAC_DET_PED D
+           JOIN COAGRO2.erpadmin.alFAC_ENC_PED E ON E.COD_CIA = D.COD_CIA AND E.NUM_PED = D.NUM_PED
+          WHERE E.TIP_DOC = 'C' AND D.TIP_DOC = 'C' AND E.COD_ZON IN (:rutas)
+          ORDER BY D.COD_CIA, D.NUM_PED, D.NUM_LN`,
+        { replacements: { rutas }, type: QueryTypes.SELECT }
+      )
+    );
+
+    const porDocumento = new Map();
+    for (const { _CIA, _PED, ...linea } of lineas) {
+      const llave = `${String(_CIA).trim()}|${String(_PED).trim()}`;
+      if (!porDocumento.has(llave)) porDocumento.set(llave, []);
+      porDocumento.get(llave).push(limpiar(linea));
+    }
+    const cotizaciones = encabezados.map((e) => {
+      const encabezado = limpiar(e);
+      return { encabezado, lineas: porDocumento.get(`${encabezado.COD_CIA}|${encabezado.NUM_PED}`) || [] };
+    });
+
+    res.send({
+      result: { cotizaciones },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de cotizaciones"],
+    });
+  }
+};
+
 module.exports = {
+  getSyncCotizaciones,
   getSyncClientes,
   getSyncArticulos,
   getSyncCobros,
+  getSyncCobrosAgente,
   getSyncConsecutivos,
   getSyncClientesCia,
   getSyncPrecios,
