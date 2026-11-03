@@ -8,7 +8,8 @@
 //   - VISITA_UBICACION   <- visitas[].ubicacion (misma llave que la visita)
 //   - alFAC_ENC_PED      <- pedidos[].encabezado (llave COD_CIA + COD_ZON + NUM_PED)
 //   - alFAC_DET_PED      <- pedidos[].lineas     (se unen al encabezado por COD_CIA + NUM_PED)
-//   - RUTA_CONSECUT_RT   <- consecutivos  (PEDIDO de la ruta, tal como lo manda la app)
+//   - alFAC_ENC_PED/DET  <- aprobaciones  (cotizacion ya enviada: TIP_DOC 'C' -> 'F')
+//   - RUTA_CONSECUT_RT   <- consecutivos  (PEDIDO de la ruta, solo si avanza)
 //
 // Request (cualquier arreglo puede venir vacio u omitirse):
 // {
@@ -16,6 +17,7 @@
 //   visitas:     [{ CLIENTE, RUTA, INICIO, FIN, FECHA_PLAN, NOTAS, TIPO, RAZON,
 //                   ubicacion: { LATITUD, LONGITUD, ALTITUD, TIEMPO_GPS, TIEMPO_PDA } | null }],
 //   pedidos:     [{ encabezado: { COD_CIA, COD_ZON, COD_CLT, NUM_PED, ... }, lineas: [{ NUM_LN, COD_ART, ... }] }],
+//   aprobaciones: [{ COD_CIA, COD_ZON, NUM_PED, FEC_PED, FEC_DES? }],   // cotizaciones que el vendedor aprobo
 //   consecutivos: [{ RUTA, PEDIDO }]   // siguiente numero de pedido de la ruta, ya incrementado por la app
 // }
 // Fechas como texto 'YYYY-MM-DD HH:MM:SS' en hora local; se guardan tal cual (sin zona horaria).
@@ -26,31 +28,46 @@
 //   result: {
 //     ubicaciones:  [{ RUTA, CLIENTE, ok, error? }],
 //     visitas:      [{ CLIENTE, RUTA, INICIO, ok, duplicado?, error? }],
-//     pedidos:      [{ COD_ZON, NUM_PED, ok, duplicado?, error? }],
-//     consecutivos: [{ RUTA, PEDIDO, ok, error? }]
+//     pedidos:      [{ COD_ZON, NUM_PED, ok, duplicado?, conflicto?, error? }],
+//     aprobaciones: [{ COD_ZON, NUM_PED, ok, duplicado?, error? }],   // siempre viene (aunque sea [])
+//     consecutivos: [{ RUTA, PEDIDO, ok, ignorado?, actual?, error? }]
 //   }
 // }
 // success: false solo si el request entero es invalido (formato); el token lo valida mobileSession (401).
 //
 // Notas:
-//  - Se procesa en orden: ubicaciones, visitas, pedidos, consecutivos. Cada registro es independiente: uno con
-//    error no impide guardar los demas.
-//  - No duplica: un pedido o visita que ya existe responde ok con duplicado: true y NO se
-//    sobrescribe (el celular puede reenviar lo mismo si se corto la respuesta).
+//  - Se procesa en orden: ubicaciones, visitas, pedidos, aprobaciones, consecutivos. Cada registro es
+//    independiente: uno con error no impide guardar los demas.
+//  - No duplica: una visita que ya existe responde ok con duplicado: true y NO se sobrescribe (el
+//    celular puede reenviar lo mismo si se corto la respuesta).
+//  - Pedido que ya existe (COD_CIA + NUM_PED en la misma ruta): si COD_CLT y HOR_INI coinciden es un
+//    reenvio (ok, duplicado: true, no se sobrescribe). Si no coinciden, otro equipo uso el mismo
+//    numero (p. ej. cambio de celular con pedidos sin enviar): ok: false, conflicto: true y no se
+//    inserta nada, para que la app renumere y reenvie. Si existe en otra ruta tambien es conflicto.
 //  - Cada pedido (encabezado + lineas) va en su propia transaccion.
 //  - La ruta debe ser de la handheld del token y el cliente debe estar en RUTA_CLIENTE de esa ruta.
-//  - TIP_DOC se guarda siempre 'F' (columna varchar(1)). COD_CIA, NUM_PED y TIP_DOC de las
+//  - TIP_DOC (varchar(1)): 'C' si la app manda una cotizacion; cualquier otro valor (o ninguno) se
+//    guarda 'F' (pedido). COD_CIA, NUM_PED y TIP_DOC de las
 //    lineas salen del encabezado. SUBTIPO_DESCRIPCION no existe en alFAC_ENC_PED: se ignora.
 //  - alFAC_DET_PED no tiene COD_ZON: un NUM_PED no puede repetirse entre rutas de la misma compania.
-//  - Consecutivo: la app lleva la cuenta y manda el SIGUIENTE numero de pedido de cada ruta; el
-//    backend lo guarda tal cual en RUTA_CONSECUT_RT.PEDIDO (no lo calcula ni lo compara). Asi
+//  - Aprobacion: solo el vendedor aprueba, desde la app (las cotizaciones no vencen). Cada una va en
+//    su propia transaccion: si el encabezado (COD_CIA + NUM_PED + COD_ZON) tiene TIP_DOC 'C', pasa a
+//    'F' junto con todas sus lineas y FEC_PED (y FEC_DES si viene) toma lo que manda la app. Si ya es
+//    'F' es un reenvio (ok, duplicado: true, no se toca). Si no existe u otro TIP_DOC: ok: false.
+//    La app descarga las cotizaciones pendientes con GET /fr/sync/cotizaciones.
+//  - Consecutivo: la app lleva la cuenta y manda el SIGUIENTE numero de pedido de cada ruta. El
+//    backend lo compara con RUTA_CONSECUT_RT.PEDIDO (prefijo + parte numerica, /^(.*?)(\d+)$/, con
+//    BigInt) y solo lo guarda si tiene el mismo prefijo y un numero MAYOR: nunca retrocede. Si es
+//    menor o igual responde ok con ignorado: true y actual (el del servidor); si el prefijo es otro,
+//    ok: false. Si el actual esta vacio o no termina en numero, se guarda tal cual. Asi
 //    GET /fr/sync/consecutivos lo devuelve en la siguiente carga.
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
 
 const FECHA_REGEX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
-const TIP_DOC = "F";
+// TIP_DOC del pedido: "F" = pedido (por defecto), "C" = cotizacion.
+const TIPOS_DOC = ["F", "C"];
 
 // Columnas que se aceptan de la app (el resto se ignora). Las de fecha van con CONVERT(..., 120).
 const COLUMNAS_ENC = [
@@ -220,6 +237,7 @@ const procesarPedido = async (contexto, p) => {
   const COD_ZON = texto(enc.COD_ZON);
   const NUM_PED = texto(enc.NUM_PED);
   const COD_CIA = texto(enc.COD_CIA);
+  const TIP_DOC = TIPOS_DOC.includes(texto(enc.TIP_DOC)) ? texto(enc.TIP_DOC) : "F";
   const salida = { COD_ZON, NUM_PED };
 
   if (!COD_CIA || !NUM_PED) return { ...salida, ok: false, error: "COD_CIA y NUM_PED son obligatorios" };
@@ -236,19 +254,29 @@ const procesarPedido = async (contexto, p) => {
 
   try {
     let duplicado = false;
+    let conflicto = null;
     await sequelize.transaction(async (transaction) => {
       // Las lineas se unen solo por COD_CIA + NUM_PED: el numero no puede estar en otra ruta.
       const [existe] = await sequelize.query(
-        `SELECT TOP 1 COD_ZON FROM COAGRO2.erpadmin.alFAC_ENC_PED WITH (UPDLOCK)
+        `SELECT TOP 1 COD_ZON, COD_CLT, CONVERT(varchar(19), HOR_INI, 120) AS HOR_INI
+           FROM COAGRO2.erpadmin.alFAC_ENC_PED WITH (UPDLOCK)
           WHERE COD_CIA = :COD_CIA AND NUM_PED = :NUM_PED`,
         { replacements: { COD_CIA, NUM_PED }, type: QueryTypes.SELECT, transaction }
       );
       if (existe && texto(existe.COD_ZON) !== COD_ZON) {
-        throw new Error(`El pedido ${NUM_PED} ya existe en la ruta ${texto(existe.COD_ZON)}`);
+        conflicto = `El pedido ${NUM_PED} ya existe en la ruta ${texto(existe.COD_ZON)}`;
+        return;
       }
 
       if (existe) {
-        duplicado = true;
+        // Mismo cliente y misma hora de inicio = reenvio; si no, otro documento uso el mismo numero.
+        if (texto(existe.COD_CLT) === texto(enc.COD_CLT) && texto(existe.HOR_INI) === texto(enc.HOR_INI)) {
+          duplicado = true;
+        } else {
+          conflicto =
+            `El número ${NUM_PED} ya lo usa otro documento ` +
+            `(cliente ${texto(existe.COD_CLT)}, ${texto(existe.HOR_INI)})`;
+        }
       } else {
         await insertar(
           "alFAC_ENC_PED",
@@ -266,11 +294,72 @@ const procesarPedido = async (contexto, p) => {
         }
       }
     });
+    if (conflicto) return { ...salida, ok: false, conflicto: true, error: conflicto };
     return { ...salida, ok: true, duplicado };
   } catch (e) {
     console.log(e);
     return { ...salida, ok: false, error: mensajeError(e) };
   }
+};
+
+// Aprobar una cotizacion ya enviada = convertirla en pedido (TIP_DOC 'C' -> 'F' en encabezado y lineas).
+const procesarAprobacion = async (contexto, a) => {
+  const COD_CIA = texto(a.COD_CIA);
+  const COD_ZON = texto(a.COD_ZON);
+  const NUM_PED = texto(a.NUM_PED);
+  const salida = { COD_ZON, NUM_PED };
+
+  if (!COD_CIA || !COD_ZON || !NUM_PED) {
+    return { ...salida, ok: false, error: "COD_CIA, COD_ZON y NUM_PED son obligatorios" };
+  }
+  if (!contexto.rutas.has(COD_ZON)) return { ...salida, ok: false, error: `La ruta ${COD_ZON} no pertenece a esta handheld` };
+  if (!texto(a.FEC_PED)) return { ...salida, ok: false, error: "El campo FEC_PED es obligatorio" };
+  const mal = fechaInvalida(a, ["FEC_PED", "FEC_DES"]);
+  if (mal) return { ...salida, ok: false, error: `${mal} debe tener formato YYYY-MM-DD HH:MM:SS` };
+
+  const FEC_PED = texto(a.FEC_PED);
+  const FEC_DES = texto(a.FEC_DES);
+  const llave = { COD_CIA, COD_ZON, NUM_PED };
+
+  try {
+    return await sequelize.transaction(async (transaction) => {
+      const [enc] = await sequelize.query(
+        `SELECT TIP_DOC FROM COAGRO2.erpadmin.alFAC_ENC_PED WITH (UPDLOCK)
+          WHERE COD_CIA = :COD_CIA AND NUM_PED = :NUM_PED AND COD_ZON = :COD_ZON`,
+        { replacements: llave, type: QueryTypes.SELECT, transaction }
+      );
+      if (!enc) return { ...salida, ok: false, error: `La cotización ${NUM_PED} no existe en la ruta ${COD_ZON}` };
+
+      const tipo = texto(enc.TIP_DOC);
+      // Ya es pedido: reenvio de la misma aprobacion.
+      if (tipo === "F") return { ...salida, ok: true, duplicado: true };
+      if (tipo !== "C") {
+        return { ...salida, ok: false, error: `El documento ${NUM_PED} tiene TIP_DOC '${tipo}': solo se aprueban cotizaciones ('C')` };
+      }
+
+      await sequelize.query(
+        `UPDATE COAGRO2.erpadmin.alFAC_ENC_PED
+            SET TIP_DOC = 'F', FEC_PED = CONVERT(datetime, :FEC_PED, 120)
+                ${FEC_DES ? ", FEC_DES = CONVERT(datetime, :FEC_DES, 120)" : ""}
+          WHERE COD_CIA = :COD_CIA AND NUM_PED = :NUM_PED AND COD_ZON = :COD_ZON AND TIP_DOC = 'C'`,
+        { replacements: { ...llave, FEC_PED, FEC_DES }, transaction }
+      );
+      await sequelize.query(
+        `UPDATE COAGRO2.erpadmin.alFAC_DET_PED SET TIP_DOC = 'F' WHERE COD_CIA = :COD_CIA AND NUM_PED = :NUM_PED`,
+        { replacements: { COD_CIA, NUM_PED }, transaction }
+      );
+      return { ...salida, ok: true };
+    });
+  } catch (e) {
+    console.log(e);
+    return { ...salida, ok: false, error: mensajeError(e) };
+  }
+};
+
+// Separa prefijo y parte numerica igual que la app ('RP10001' -> RP, 10001n). null si no termina en numero.
+const partirConsecutivo = (valor) => {
+  const m = /^(.*?)(\d+)$/.exec(valor);
+  return m ? { prefijo: m[1], numero: BigInt(m[2]) } : null;
 };
 
 const procesarConsecutivo = async (contexto, c) => {
@@ -281,12 +370,34 @@ const procesarConsecutivo = async (contexto, c) => {
   if (!contexto.rutas.has(RUTA)) return { ...salida, ok: false, error: `La ruta ${RUTA} no pertenece a esta handheld` };
 
   try {
-    const [, filas] = await sequelize.query(
-      `UPDATE COAGRO2.erpadmin.RUTA_CONSECUT_RT SET PEDIDO = :PEDIDO WHERE RUTA = :RUTA`,
-      { replacements: { RUTA, PEDIDO } }
-    );
-    if (!filas) return { ...salida, ok: false, error: `La ruta ${RUTA} no tiene consecutivos configurados` };
-    return { ...salida, ok: true };
+    return await sequelize.transaction(async (transaction) => {
+      const [fila] = await sequelize.query(
+        `SELECT PEDIDO FROM COAGRO2.erpadmin.RUTA_CONSECUT_RT WITH (UPDLOCK) WHERE RUTA = :RUTA`,
+        { replacements: { RUTA }, type: QueryTypes.SELECT, transaction }
+      );
+      if (!fila) return { ...salida, ok: false, error: `La ruta ${RUTA} no tiene consecutivos configurados` };
+
+      // Nunca retrocede: solo avanza con el mismo prefijo y un numero mayor al del servidor.
+      const actual = texto(fila.PEDIDO);
+      const delServidor = partirConsecutivo(actual);
+      if (delServidor) {
+        const recibido = partirConsecutivo(PEDIDO);
+        if (!recibido || recibido.prefijo !== delServidor.prefijo) {
+          return {
+            ...salida,
+            ok: false,
+            error: `El consecutivo ${PEDIDO} no tiene el formato del actual de la ruta ${RUTA} (${actual})`,
+          };
+        }
+        if (recibido.numero <= delServidor.numero) return { ...salida, ok: true, ignorado: true, actual };
+      }
+
+      await sequelize.query(
+        `UPDATE COAGRO2.erpadmin.RUTA_CONSECUT_RT SET PEDIDO = :PEDIDO WHERE RUTA = :RUTA`,
+        { replacements: { RUTA, PEDIDO }, transaction }
+      );
+      return { ...salida, ok: true };
+    });
   } catch (e) {
     console.log(e);
     return { ...salida, ok: false, error: mensajeError(e) };
@@ -299,7 +410,7 @@ const postSyncEnviar = async (req, res) => {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return res.send({ result: {}, success: false, errors: ["El cuerpo debe ser un objeto JSON"] });
     }
-    for (const k of ["ubicaciones", "visitas", "pedidos", "consecutivos"]) {
+    for (const k of ["ubicaciones", "visitas", "pedidos", "aprobaciones", "consecutivos"]) {
       if (body[k] !== undefined && body[k] !== null && !Array.isArray(body[k])) {
         return res.send({ result: {}, success: false, errors: [`${k} debe ser un arreglo`] });
       }
@@ -307,6 +418,7 @@ const postSyncEnviar = async (req, res) => {
     const ubicaciones = body.ubicaciones || [];
     const visitas = body.visitas || [];
     const pedidos = body.pedidos || [];
+    const aprobaciones = body.aprobaciones || [];
     const consecutivos = body.consecutivos || [];
 
     // Contexto para validar: rutas de la handheld, sus clientes y los articulos de los pedidos.
@@ -331,11 +443,12 @@ const postSyncEnviar = async (req, res) => {
       articulos: new Set(articulos.map((a) => texto(a.COD_ART))),
     };
 
-    // Orden: ubicaciones, visitas, pedidos, consecutivos.
-    const result = { ubicaciones: [], visitas: [], pedidos: [], consecutivos: [] };
+    // Orden: ubicaciones, visitas, pedidos, aprobaciones, consecutivos.
+    const result = { ubicaciones: [], visitas: [], pedidos: [], aprobaciones: [], consecutivos: [] };
     for (const u of ubicaciones) result.ubicaciones.push(await procesarUbicacion(contexto, u || {}));
     for (const v of visitas) result.visitas.push(await procesarVisita(contexto, v || {}));
     for (const p of pedidos) result.pedidos.push(await procesarPedido(contexto, p || {}));
+    for (const a of aprobaciones) result.aprobaciones.push(await procesarAprobacion(contexto, a || {}));
     for (const c of consecutivos) result.consecutivos.push(await procesarConsecutivo(contexto, c || {}));
 
     res.send({ result, success: true, errors: [] });
@@ -345,4 +458,5 @@ const postSyncEnviar = async (req, res) => {
   }
 };
 
-module.exports = { postSyncEnviar };
+// Las columnas tambien las usa GET /fr/sync/cotizaciones (controllers/fr/sync.js).
+module.exports = { postSyncEnviar, COLUMNAS_ENC, COLUMNAS_DET, FECHAS_ENC };
