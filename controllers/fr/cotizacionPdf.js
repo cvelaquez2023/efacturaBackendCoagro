@@ -12,6 +12,8 @@
 //   - erpadmin.CLIENTE_CIA   -> contacto y telefono del cliente en la compania
 //   - erpadmin.RUTA_RT       -> nombre de la ruta (RUTA = COD_ZON)
 //   - erpadmin.ARTICULO      -> descripcion del articulo (COD_ART)
+//   - erpadmin.alFAC_CND_PAG -> descripcion de la condicion de pago (COD_CND + COD_CIA)
+//   - erpadmin.alFAC_DIR_EMB_CLT -> detalle de la direccion de entrega (COD_CLT + COD_CIA + DIR_EMB = DIR_ENT)
 //   - dte.dbo.empresa        -> datos del emisor (nombre, NIT, NRC, direccion, telefono, correo)
 //
 // Respuesta: application/pdf (inline). Si no existe o no se puede generar: JSON
@@ -19,7 +21,11 @@
 //
 // Notas:
 //  - El titulo sale de TIP_DOC: 'C' = COTIZACION, cualquier otro = PEDIDO (una cotizacion aprobada
-//    ya es pedido y se puede volver a imprimir).
+//    ya es pedido y se puede volver a imprimir). Al aprobarse conserva su NUM_PED, asi que un pedido
+//    con NUM_PED de la serie COTRT vino de una cotizacion y el PDF muestra ese consecutivo de origen.
+//  - Lista de precio: NIVEL_PRECIO (nombre del nivel), no LST_PRE (id numerico). Condicion de pago
+//    con su descripcion; moneda 'D'/'L' con nombre. La bodega va con su codigo (el catalogo esta en
+//    CINCOH y el endpoint movil solo consulta erpadmin).
 //  - Totales del encabezado: subtotal MON_SIV, descuento MON_DSC, IVA MON_IMP_VT, total MON_CIV.
 
 const fs = require("fs");
@@ -33,6 +39,10 @@ const { generatePdfWithPuppeteer } = require("../../utils/generaPdf");
 
 const PLANTILLA = path.join(__dirname, "../../template/cotizacion.html");
 const LOGO = path.join(__dirname, "../../template/logo.jpeg");
+// Serie de cotizaciones de RUTA_CONSECUT_RT.FACTURA (ver getSyncConsecutivos).
+const PREFIJO_COTIZACION = "COTRT";
+// alFAC_ENC_PED.MONEDA: 'D' dolar, 'L' local.
+const MONEDAS = { D: "Dólar (USD)", L: "Moneda local" };
 
 // Se leen una sola vez: la plantilla y el logo no cambian mientras corre el servidor.
 let plantilla;
@@ -59,10 +69,10 @@ const buscarDocumento = async (cia, pedido, rutas) => {
   const [[encabezado], lineas] = await Promise.all([
     sequelize.query(
       `SELECT P.COD_CIA, P.COD_ZON, P.COD_CLT, P.NUM_PED, P.TIP_DOC, P.COD_BOD, P.COD_CND, P.MONEDA,
-              P.OBS_PED, P.DIR_ENT, P.MON_SIV, P.MON_DSC, P.MON_IMP_VT, P.MON_CIV,
+              P.OBS_PED, P.DIR_ENT, P.MON_SIV, P.MON_DSC, P.MON_IMP_VT, P.MON_CIV, P.NIVEL_PRECIO,
               CONVERT(varchar(10), P.FEC_PED, 103) AS FEC_PED,
               CONVERT(varchar(10), P.FEC_DES, 103) AS FEC_DES,
-              C.NOM_CLT, C.DIR_CLT, CC.NOM_CTO, CC.NUM_TEL, R.DESCRIPCION AS RUTA_DESCRIPCION
+              C.NOM_CLT, C.DIR_CLT, CC.NOM_CTO, CC.NUM_TEL, R.DESCRIPCION AS RUTA_DESCRIPCION, CP.DES_CND, DE.DETA_EMB
          FROM COAGRO2.erpadmin.alFAC_ENC_PED P
          OUTER APPLY (SELECT TOP 1 NOM_CLT, DIR_CLT FROM COAGRO2.erpadmin.cliente
                        WHERE COD_CLT = P.COD_CLT) C
@@ -70,6 +80,11 @@ const buscarDocumento = async (cia, pedido, rutas) => {
                        WHERE COD_CLT = P.COD_CLT AND COD_CIA = P.COD_CIA) CC
          OUTER APPLY (SELECT TOP 1 DESCRIPCION FROM COAGRO2.erpadmin.RUTA_RT
                        WHERE RUTA = P.COD_ZON) R
+         OUTER APPLY (SELECT TOP 1 DES_CND FROM COAGRO2.erpadmin.alFAC_CND_PAG
+                       WHERE COD_CND = P.COD_CND AND COD_CIA = P.COD_CIA) CP
+         OUTER APPLY (SELECT TOP 1 CAST(DETA_EMB AS varchar(max)) AS DETA_EMB
+                        FROM COAGRO2.erpadmin.alFAC_DIR_EMB_CLT
+                       WHERE COD_CLT = P.COD_CLT AND COD_CIA = P.COD_CIA AND DIR_EMB = P.DIR_ENT) DE
         WHERE P.COD_CIA = :cia AND P.NUM_PED = :pedido ${filtroRuta}`,
       { replacements, type: QueryTypes.SELECT }
     ),
@@ -92,12 +107,20 @@ const armarPdf = async ({ encabezado: e, lineas }, empresaId) => {
   const { plantilla, logo } = recursos();
   const ruta = texto(e.COD_ZON);
   const nombreRuta = texto(e.RUTA_DESCRIPCION);
+  const esCotizacion = texto(e.TIP_DOC) === "C";
+  const numero = texto(e.NUM_PED);
+  const condicion = texto(e.COD_CND);
+  const desCondicion = texto(e.DES_CND);
+  const moneda = texto(e.MONEDA);
 
   const html = plantilla({
     d: {
       logo,
-      titulo: texto(e.TIP_DOC) === "C" ? "COTIZACIÓN" : "PEDIDO",
-      numero: texto(e.NUM_PED),
+      titulo: esCotizacion ? "COTIZACIÓN" : "PEDIDO",
+      etiquetaNumero: esCotizacion ? "No. cotización" : "No. pedido",
+      numero,
+      // Pedido que viene de una cotizacion aprobada: conserva el NUM_PED de la serie COTRT.
+      cotizacionOrigen: !esCotizacion && numero.startsWith(PREFIJO_COTIZACION) ? numero : "",
       fecha: texto(e.FEC_PED),
       fechaEntrega: texto(e.FEC_DES),
       emisor: {
@@ -116,10 +139,11 @@ const armarPdf = async ({ encabezado: e, lineas }, empresaId) => {
         direccion: texto(e.DIR_CLT),
       },
       ruta: nombreRuta ? `${ruta} - ${nombreRuta}` : ruta,
-      condicionPago: texto(e.COD_CND),
+      condicionPago: desCondicion && desCondicion !== condicion ? `${condicion} - ${desCondicion}` : condicion,
+      listaPrecio: texto(e.NIVEL_PRECIO),
       bodega: texto(e.COD_BOD),
-      moneda: texto(e.MONEDA) || "USD",
-      direccionEntrega: texto(e.DIR_ENT),
+      moneda: MONEDAS[moneda] || moneda || MONEDAS.D,
+      direccionEntrega: texto(e.DETA_EMB) || texto(e.DIR_ENT),
       observaciones: texto(e.OBS_PED),
       lineas: lineas.map((l, i) => ({
         numero: texto(l.NUM_LN) || i + 1,

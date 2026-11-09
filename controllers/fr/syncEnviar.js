@@ -9,7 +9,7 @@
 //   - alFAC_ENC_PED      <- pedidos[].encabezado (llave COD_CIA + COD_ZON + NUM_PED)
 //   - alFAC_DET_PED      <- pedidos[].lineas     (se unen al encabezado por COD_CIA + NUM_PED)
 //   - alFAC_ENC_PED/DET  <- aprobaciones  (cotizacion ya enviada: TIP_DOC 'C' -> 'F')
-//   - RUTA_CONSECUT_RT   <- consecutivos  (PEDIDO de la ruta, solo si avanza)
+//   - RUTA_CONSECUT_RT   <- consecutivos  (PEDIDO y/o FACTURA de la ruta, solo si avanzan)
 //
 // Request (cualquier arreglo puede venir vacio u omitirse):
 // {
@@ -18,7 +18,7 @@
 //                   ubicacion: { LATITUD, LONGITUD, ALTITUD, TIEMPO_GPS, TIEMPO_PDA } | null }],
 //   pedidos:     [{ encabezado: { COD_CIA, COD_ZON, COD_CLT, NUM_PED, ... }, lineas: [{ NUM_LN, COD_ART, ... }] }],
 //   aprobaciones: [{ COD_CIA, COD_ZON, NUM_PED, FEC_PED, FEC_DES? }],   // cotizaciones que el vendedor aprobo
-//   consecutivos: [{ RUTA, PEDIDO }]   // siguiente numero de pedido de la ruta, ya incrementado por la app
+//   consecutivos: [{ RUTA, PEDIDO?, FACTURA? }]   // siguiente pedido / cotizacion de la ruta, ya incrementado por la app
 // }
 // Fechas como texto 'YYYY-MM-DD HH:MM:SS' en hora local; se guardan tal cual (sin zona horaria).
 //
@@ -30,7 +30,7 @@
 //     visitas:      [{ CLIENTE, RUTA, INICIO, ok, duplicado?, error? }],
 //     pedidos:      [{ COD_ZON, NUM_PED, ok, duplicado?, conflicto?, error? }],
 //     aprobaciones: [{ COD_ZON, NUM_PED, ok, duplicado?, error? }],   // siempre viene (aunque sea [])
-//     consecutivos: [{ RUTA, PEDIDO, ok, ignorado?, actual?, error? }]
+//     consecutivos: [{ RUTA, PEDIDO, FACTURA?, ok, ignorado?, actual?, ignoradoFactura?, actualFactura?, error? }]
 //   }
 // }
 // success: false solo si el request entero es invalido (formato); el token lo valida mobileSession (401).
@@ -60,7 +60,8 @@
 //    BigInt) y solo lo guarda si tiene el mismo prefijo y un numero MAYOR: nunca retrocede. Si es
 //    menor o igual responde ok con ignorado: true y actual (el del servidor); si el prefijo es otro,
 //    ok: false. Si el actual esta vacio o no termina en numero, se guarda tal cual. Asi
-//    GET /fr/sync/consecutivos lo devuelve en la siguiente carga.
+//    GET /fr/sync/consecutivos lo devuelve en la siguiente carga. FACTURA (consecutivo de cotizaciones)
+//    sigue la misma regla contra RUTA_CONSECUT_RT.FACTURA; su resultado va en ignoradoFactura/actualFactura.
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
@@ -362,41 +363,66 @@ const partirConsecutivo = (valor) => {
   return m ? { prefijo: m[1], numero: BigInt(m[2]) } : null;
 };
 
+// Nunca retrocede: solo avanza con el mismo prefijo y un numero mayor al del servidor.
+// Devuelve { error } si el prefijo no coincide, { ignorado: true } si no avanza, o {} si se guarda.
+const compararConsecutivo = (RUTA, recibidoTexto, actual) => {
+  const delServidor = partirConsecutivo(actual);
+  if (!delServidor) return {};
+  const recibido = partirConsecutivo(recibidoTexto);
+  if (!recibido || recibido.prefijo !== delServidor.prefijo) {
+    return { error: `El consecutivo ${recibidoTexto} no tiene el formato del actual de la ruta ${RUTA} (${actual})` };
+  }
+  return recibido.numero <= delServidor.numero ? { ignorado: true } : {};
+};
+
+// PEDIDO (pedidos) y FACTURA (cotizaciones), cada uno opcional pero al menos uno. Misma regla para
+// ambos. Si alguno tiene error no se guarda ninguno. La respuesta de PEDIDO conserva su forma
+// (ignorado, actual); la de FACTURA va en ignoradoFactura, actualFactura.
 const procesarConsecutivo = async (contexto, c) => {
   const RUTA = texto(c.RUTA);
   const PEDIDO = texto(c.PEDIDO);
+  const FACTURA = texto(c.FACTURA);
   const salida = { RUTA, PEDIDO };
-  if (!RUTA || !PEDIDO) return { ...salida, ok: false, error: "RUTA y PEDIDO son obligatorios" };
+  if (FACTURA) salida.FACTURA = FACTURA;
+  if (!RUTA || (!PEDIDO && !FACTURA)) {
+    return { ...salida, ok: false, error: "RUTA y PEDIDO o FACTURA son obligatorios" };
+  }
   if (!contexto.rutas.has(RUTA)) return { ...salida, ok: false, error: `La ruta ${RUTA} no pertenece a esta handheld` };
 
   try {
     return await sequelize.transaction(async (transaction) => {
       const [fila] = await sequelize.query(
-        `SELECT PEDIDO FROM COAGRO2.erpadmin.RUTA_CONSECUT_RT WITH (UPDLOCK) WHERE RUTA = :RUTA`,
+        `SELECT PEDIDO, FACTURA FROM COAGRO2.erpadmin.RUTA_CONSECUT_RT WITH (UPDLOCK) WHERE RUTA = :RUTA`,
         { replacements: { RUTA }, type: QueryTypes.SELECT, transaction }
       );
       if (!fila) return { ...salida, ok: false, error: `La ruta ${RUTA} no tiene consecutivos configurados` };
 
-      // Nunca retrocede: solo avanza con el mismo prefijo y un numero mayor al del servidor.
-      const actual = texto(fila.PEDIDO);
-      const delServidor = partirConsecutivo(actual);
-      if (delServidor) {
-        const recibido = partirConsecutivo(PEDIDO);
-        if (!recibido || recibido.prefijo !== delServidor.prefijo) {
-          return {
-            ...salida,
-            ok: false,
-            error: `El consecutivo ${PEDIDO} no tiene el formato del actual de la ruta ${RUTA} (${actual})`,
-          };
+      const respuesta = { ...salida, ok: true };
+      const sets = [];
+      const campos = [
+        { columna: "PEDIDO", valor: PEDIDO, ignorado: "ignorado", actual: "actual" },
+        { columna: "FACTURA", valor: FACTURA, ignorado: "ignoradoFactura", actual: "actualFactura" },
+      ];
+      for (const campo of campos) {
+        if (!campo.valor) continue;
+        const actual = texto(fila[campo.columna]);
+        const r = compararConsecutivo(RUTA, campo.valor, actual);
+        if (r.error) return { ...salida, ok: false, error: r.error };
+        if (r.ignorado) {
+          respuesta[campo.ignorado] = true;
+          respuesta[campo.actual] = actual;
+        } else {
+          sets.push(`${campo.columna} = :${campo.columna}`);
         }
-        if (recibido.numero <= delServidor.numero) return { ...salida, ok: true, ignorado: true, actual };
       }
 
-      await sequelize.query(
-        `UPDATE COAGRO2.erpadmin.RUTA_CONSECUT_RT SET PEDIDO = :PEDIDO WHERE RUTA = :RUTA`,
-        { replacements: { RUTA, PEDIDO }, transaction }
-      );
-      return { ...salida, ok: true };
+      if (sets.length) {
+        await sequelize.query(
+          `UPDATE COAGRO2.erpadmin.RUTA_CONSECUT_RT SET ${sets.join(", ")} WHERE RUTA = :RUTA`,
+          { replacements: { RUTA, PEDIDO, FACTURA }, transaction }
+        );
+      }
+      return respuesta;
     });
   } catch (e) {
     console.log(e);

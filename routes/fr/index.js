@@ -34,6 +34,7 @@ router.use("/agenteAsocRt", require("./agenteAsocRt"));
 router.use("/rutaAsignadaRt", require("./rutaAsignadaRt"));
 router.use("/rutaCliente", require("./rutaCliente"));
 router.use("/rutaConsecutRt", require("./rutaConsecutRt"));
+router.use("/carga", require("./carga"));
 
 
 module.exports = router;
