@@ -543,9 +543,26 @@ const getSyncCobrosAgente = async (req, res) => {
 // }
 //
 // Nota: una ruta de la handheld sin configuracion en RUTA_CONSECUT_RT simplemente no viene.
+//
+// FACTURA es el consecutivo de cotizaciones de la app (NUM_PED = FACTURA). Antes de leer, a las
+// rutas de la handheld que aun no tienen serie de cotizacion (FACTURA NULL, vacio o sin prefijo
+// 'COTRT') se les pone 'COTRT' + RUTA + '-001' (p. ej. 'COTRTR01-001'). El guion separa la ruta del
+// contador por si la ruta termina en digitos. Prefijo por ruta porque NUM_PED no puede repetirse
+// dentro de la compania. Un solo UPDATE condicionado: idempotente y seguro si dos equipos
+// sincronizan a la vez; una ruta que ya tiene serie COTRT nunca se reinicia. No crea filas.
 
 const getSyncConsecutivos = async (req, res) => {
   try {
+    if (req.mobile.codigosRuta.length) {
+      await sequelize.query(
+        `UPDATE COAGRO2.erpadmin.RUTA_CONSECUT_RT
+            SET FACTURA = 'COTRT' + LTRIM(RTRIM(RUTA)) + '-001'
+          WHERE RUTA IN (:rutas)
+            AND (FACTURA IS NULL OR LTRIM(RTRIM(FACTURA)) = '' OR FACTURA NOT LIKE 'COTRT%')`,
+        { replacements: { rutas: req.mobile.codigosRuta } }
+      );
+    }
+
     const consecutivos = await rutaConsecutRtModel.findAll({
       where: { RUTA: req.mobile.codigosRuta },
       order: [["RUTA", "ASC"]],

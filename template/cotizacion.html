@@ -77,7 +77,8 @@
     <div class="caja-doc">
       <div class="tipo">{{d.titulo}}</div>
       <table>
-        <tr><td class="etq">No.</td><td class="val">{{d.numero}}</td></tr>
+        <tr><td class="etq">{{d.etiquetaNumero}}</td><td class="val">{{d.numero}}</td></tr>
+        {{#if d.cotizacionOrigen}}<tr><td class="etq">Cotización</td><td class="val">{{d.cotizacionOrigen}}</td></tr>{{/if}}
         <tr><td class="etq">Fecha</td><td class="val">{{d.fecha}}</td></tr>
         {{#if d.fechaEntrega}}<tr><td class="etq">Entrega</td><td class="val">{{d.fechaEntrega}}</td></tr>{{/if}}
       </table>
@@ -101,6 +102,7 @@
       <table>
         <tr><td class="etq">Ruta / vendedor</td><td>{{d.ruta}}</td></tr>
         {{#if d.condicionPago}}<tr><td class="etq">Cond. de pago</td><td>{{d.condicionPago}}</td></tr>{{/if}}
+        {{#if d.listaPrecio}}<tr><td class="etq">Lista de precio</td><td>{{d.listaPrecio}}</td></tr>{{/if}}
         {{#if d.bodega}}<tr><td class="etq">Bodega</td><td>{{d.bodega}}</td></tr>{{/if}}
         <tr><td class="etq">Moneda</td><td>{{d.moneda}}</td></tr>
         {{#if d.direccionEntrega}}<tr><td class="etq">Entregar en</td><td>{{d.direccionEntrega}}</td></tr>{{/if}}

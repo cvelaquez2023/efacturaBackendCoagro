@@ -600,3 +600,6 @@ TypeError: Cannot read properties of undefined (reading 'Dte_Id')
 [2026-11-02 20:06:18] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
 [2026-11-02 20:52:40] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
 [2026-11-02 21:06:50] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-11-09 11:38:58] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-11-09 11:41:51] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
+[2026-11-09 11:42:43] [INFO] [cron] [startCron] Cron envioDte desactivado por variable de entorno CRON_ENVIO_DTE
