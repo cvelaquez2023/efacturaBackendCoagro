@@ -1115,7 +1115,8 @@ const getSyncHistorialPedidos = async (req, res) => {
 //     cliente: "04372",
 //     historial: [{
 //       encabezado: { COD_CIA, NUM_FAC, NUM_PED, MON_FAC, COD_CLT, COD_ZON, FEC_FAC, ANULAR, NCF, COD_CND,
-//                     DESC1, DESC2, MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL, ESTADO_COMPROBANTE },
+//                     DESC1, DESC2, MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL, ESTADO_COMPROBANTE,
+//                     AGENTE, NOMBRE_AGENTE },
 //       anulada: false,
 //       lineas: [{ COD_ART, NUM_LN, CANT_FAC, CANT_DEV, PRE_UNI, MONT_LN, MONT_DESC, PRC_DESC, total,
 //                  EST_BON, LOTE }],                     -> por NUM_LN
@@ -1132,6 +1133,14 @@ const getSyncHistorialPedidos = async (req, res) => {
 //    subtotal = EST_BON 'V', iva = subtotal * 0.13, granTotal = subtotal * 1.13 (cuadra con MON_FAC
 //    salvo centavos de redondeo del ERP). Una factura sin lineas de ese tipo lleva 0.
 //  - Anuladas (ANULAR = 'S') SI vienen, con anulada: true, para que la app las marque.
+//  - AGENTE / NOMBRE_AGENTE: vendedor de la factura, codigo del ERP (VBV, VCZ...).
+//      AGENTE        = ESTADO_COMPROBANTE (la carga guarda ahi el vendedor de la factura del ERP); si viene
+//                      vacio, el agente del ERP asignado HOY a la ruta (RUTA_ASIGNADA_RT -> AGENTE_ASOC_RT.AGENTE;
+//                      sin fechas, no refleja cambios de vendedor en el tiempo).
+//      NOMBRE_AGENTE = erpadmin.V_AGENTE.NOMBRE (si no esta, AGENTE_RT.NOMBRE).
+//    A diferencia de /fr/sync/cobros, el respaldo usa el codigo del ERP y no el de ruteo, para que un
+//    mismo vendedor no salga con dos codigos (ej. VBV y AG01). null si no hay ninguno.
+//    ESTADO_COMPROBANTE sigue saliendo tal cual (hoy trae el mismo codigo que AGENTE).
 //  - Una misma factura puede estar dos veces en alFAC_ENC_HIST_FAC con distinto COD_ZON: sale una sola
 //    vez (con la menor de mis rutas) y sus lineas no se duplican.
 //  - Orden: fecha descendente. FEC_FAC como texto 'YYYY-MM-DD HH:MM:SS'. Textos sin espacios al final.
@@ -1146,13 +1155,28 @@ const historialFacturas = async ({ filtro, replacements, orden }) => {
   const [encabezados, lineas, montos] = await Promise.all([
     sequelize.query(
       `SELECT COD_CIA, NUM_FAC, NUM_PED, MON_FAC, COD_CLT, COD_ZON, FEC_FAC, ANULAR, NCF, COD_CND,
-              DESC1, DESC2, MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL, ESTADO_COMPROBANTE
+              DESC1, DESC2, MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL, ESTADO_COMPROBANTE,
+              AGENTE, NOMBRE_AGENTE
          FROM (SELECT E.COD_CIA, E.NUM_FAC, E.NUM_PED, E.MON_FAC, E.COD_CLT, E.COD_ZON,
                       CONVERT(varchar(19), E.FEC_FAC, 120) AS FEC_FAC, E.FEC_FAC AS _FECHA,
                       E.ANULAR, E.NCF, E.COD_CND, E.DESC1, E.DESC2, E.MONT_DESC1, E.MONT_DESC2,
                       E.ACTIVIDAD_COMERCIAL, E.ESTADO_COMPROBANTE,
+                      AG.AGENTE, COALESCE(VN.NOMBRE, RN.NOMBRE) AS NOMBRE_AGENTE,
                       ROW_NUMBER() OVER (PARTITION BY E.COD_CIA, E.NUM_FAC ORDER BY E.COD_ZON) AS _N
                  FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC E
+                 -- Respaldo: agente del ERP de la ruta de la factura (TOP 1 por si hay mas de una asignacion).
+                 OUTER APPLY (SELECT TOP 1 AA.AGENTE AS AGENTE_ERP
+                                FROM COAGRO2.erpadmin.RUTA_ASIGNADA_RT A
+                                JOIN COAGRO2.erpadmin.AGENTE_ASOC_RT AA ON AA.CODIGO = A.AGENTE
+                               WHERE A.RUTA = E.COD_ZON AND A.ACTIVA = 'S'
+                               ORDER BY A.AGENTE) RA
+                 -- ESTADO_COMPROBANTE guarda el vendedor del ERP de la factura (lo llena la carga).
+                 CROSS APPLY (SELECT COALESCE(NULLIF(LTRIM(RTRIM(E.ESTADO_COMPROBANTE)), ''), RA.AGENTE_ERP) AS AGENTE) AG
+                 -- V_AGENTE repite cada agente; TOP 1, primero el de la compania de la factura.
+                 OUTER APPLY (SELECT TOP 1 V.NOMBRE FROM COAGRO2.erpadmin.V_AGENTE V
+                               WHERE V.AGENTE = AG.AGENTE
+                               ORDER BY CASE WHEN V.COMPANIA = E.COD_CIA THEN 0 ELSE 1 END) VN
+                 OUTER APPLY (SELECT TOP 1 NOMBRE FROM COAGRO2.erpadmin.AGENTE_RT WHERE AGENTE = AG.AGENTE) RN
                 WHERE ${filtro}) F
         WHERE _N = 1
         ORDER BY ${orden}, NUM_FAC`,
