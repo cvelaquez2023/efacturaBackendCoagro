@@ -57,6 +57,7 @@ const models = {
   rutaAsignadaRtModel: require("./fr/RutaAsignadaRt"),
   rutaClienteModel: require("./fr/RutaCliente"),
   rutaConsecutRtModel: require("./fr/RutaConsecutRt"),
+  configHhModel: require("./fr/ConfigHh"),
 };
 
 module.exports = models;

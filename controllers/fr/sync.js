@@ -297,6 +297,74 @@ const getSyncArticulos = async (req, res) => {
 };
 
 //
+// GET /fr/sync/lotes   (header Authorization: Bearer <token movil>)
+// Existencias por lote de las bodegas de las rutas de la handheld del token.
+//
+// Tablas:
+//   - erpadmin.RUTA_ASIGNADA_RT / BODEGA_ASOC_RT -> bodega del ERP de cada ruta (BODEGA_ERP, via mobileSession)
+//   - erpadmin.ARTICULO                         -> solo articulos de los grupos (GRP_ART) de esas rutas
+//   - erpadmin.ARTICULO_EXISTENCIA_LOTE         -> existencia por articulo, bodega, localizacion y lote
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     lotes: [{ COMPANIA, BODEGA, ARTICULO, LOCALIZACION, LOTE, FECHA_VENCIMIENTO, EXISTENCIA,
+//               TIPO_INGRESO }]                                      -> ARTICULO_EXISTENCIA_LOTE
+//   }
+// }
+//
+// Notas:
+//  - Mismo filtro que existencias en GET /fr/sync/articulos: BODEGA = BODEGA_ERP de las rutas de la
+//    handheld y solo articulos de sus grupos. La handheld filtra por la ruta con la que trabaja con
+//    rutas[i].BODEGA_ERP de /fr/sync/articulos, y une por ARTICULO = ARTICULO.COD_ART.
+//  - Solo aplica a articulos con ARTICULO.USA_LOTES; los demas no tienen filas aqui.
+//  - Llave de un lote: COMPANIA + BODEGA + ARTICULO + LOCALIZACION + LOTE.
+//  - Orden: bodega, articulo y vencimiento ascendente (el que vence primero va primero).
+//  - FECHA_VENCIMIENTO como texto 'YYYY-MM-DD HH:MM:SS'. Textos sin los espacios al final.
+//  - Las filas salen tal cual de la tabla (no se filtra EXISTENCIA <= 0).
+//  - Una handheld cuyas rutas no tienen BODEGA_ERP recibe lotes: [].
+const getSyncLotes = async (req, res) => {
+  try {
+    const grupos = [...new Set(req.mobile.rutas.map((r) => String(r.GRUPO_ARTICULO).trim()))];
+    // ARTICULO_EXISTENCIA_LOTE usa la bodega del ERP, no el codigo de ruteo.
+    const bodegas = [
+      ...new Set(req.mobile.rutas.map((r) => (r.BODEGA_ERP == null ? null : String(r.BODEGA_ERP).trim())).filter(Boolean)),
+    ];
+
+    const filas = bodegas.length
+      ? await sequelize.query(
+          `SELECT L.COMPANIA, L.BODEGA, L.ARTICULO, L.LOCALIZACION, L.LOTE,
+                  CONVERT(varchar(19), L.FECHA_VENCIMIENTO, 120) AS FECHA_VENCIMIENTO,
+                  L.EXISTENCIA, L.TIPO_INGRESO
+             FROM COAGRO2.erpadmin.ARTICULO_EXISTENCIA_LOTE L
+            WHERE L.BODEGA IN (:bodegas)
+              AND L.ARTICULO IN (SELECT COD_ART FROM COAGRO2.erpadmin.ARTICULO WHERE GRP_ART IN (:grupos))
+            ORDER BY L.BODEGA, L.ARTICULO, L.FECHA_VENCIMIENTO, L.LOTE`,
+          { replacements: { bodegas, grupos }, type: QueryTypes.SELECT }
+        )
+      : [];
+    const lotes = filas.map((f) =>
+      Object.fromEntries(Object.entries(f).map(([k, v]) => [k, typeof v === "string" ? v.trim() : v]))
+    );
+
+    res.send({
+      result: { lotes },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de lotes"],
+    });
+  }
+};
+
+//
 // GET /fr/sync/precios?cliente=00109   (header Authorization: Bearer <token movil>)
 // Precios de los articulos para el nivel de precio de un cliente (lo que puede ver en el pedido).
 //
@@ -551,6 +619,56 @@ const getSyncCobrosAgente = async (req, res) => {
 // dentro de la compania. Un solo UPDATE condicionado: idempotente y seguro si dos equipos
 // sincronizan a la vez; una ruta que ya tiene serie COTRT nunca se reinicia. No crea filas.
 
+//
+// GET /fr/sync/configuracion   (header Authorization: Bearer <token movil>)
+// Parametros de la app para la handheld del token.
+//
+// Tabla: erpadmin.CONFIG_HH (una fila por HANDHELD + CONSTANTE).
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     configuracion: [{ HANDHELD, CONSTANTE, VALOR, SIMBOLO_MONEDA, ..., GPS_DISTANCIA_M }] -> CONFIG_HH
+//   }
+// }
+//
+// Notas:
+//  - Las columnas GPS_* son bit: llegan como true/false (o null).
+//  - Una handheld sin filas en CONFIG_HH recibe configuracion: [] (la app usa sus valores por defecto).
+
+const getSyncConfiguracion = async (req, res) => {
+  try {
+    const configuracion = await sequelize.query(
+      `SELECT HANDHELD, CONSTANTE, VALOR, SIMBOLO_MONEDA, NOMBRE_ARCHIVO_BITACORA,
+              REGISTRO_MULTIPLE_DOCUMENTO, CANTIDAD_DECIMALES, TAMANO_LETRA_WM, DECIMALES_UNIDADES,
+              LIMPIADO_FILTRO_ARTICULOS_ANDROID, INFORMACION_DESCUENTOS_VENCIDA,
+              SELECCION_AUTOMATICA_CLIENTE_WM, BUSQUEDA_AGIL_CLIENTE_WM, ORDENAR_ARTICULO_CRITERIO_WM,
+              ORDENAR_ARTICULO_INDICE_WM, ADVERTIR_ACTUALIZACION, PURGA_AUTOMATICA, PURGA_MANUAL,
+              PURGA_CANTIDAD_DIAS, GPS_UBICACION_VISITA, GPS_UBICACION_CLIENTE,
+              GPS_ACTUALIZAR_UBICACION_CLIENTE, GPS_NO_DETENER_PROCESO_WM, GPS_DISTANCIA_M
+         FROM COAGRO2.erpadmin.CONFIG_HH
+        WHERE HANDHELD = :handheld
+        ORDER BY CONSTANTE`,
+      { replacements: { handheld: req.mobile.handheld.HANDHELD }, type: QueryTypes.SELECT }
+    );
+
+    res.send({
+      result: { configuracion },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de configuracion"],
+    });
+  }
+};
+
 const getSyncConsecutivos = async (req, res) => {
   try {
     if (req.mobile.codigosRuta.length) {
@@ -739,13 +857,307 @@ const getSyncCotizaciones = async (req, res) => {
   }
 };
 
+// Busca al cliente en las rutas de la handheld. Devuelve el codigo, o null si ya respondio el error.
+const clienteDeMisRutas = async (req, res) => {
+  const cliente = String(req.query.cliente || "").trim();
+  if (!cliente) {
+    res.send({ result: {}, success: false, errors: ["El parametro cliente es obligatorio"] });
+    return null;
+  }
+  const asignado = await rutaClienteModel.findOne({
+    where: { RUTA: req.mobile.codigosRuta, CLIENTE: cliente },
+    raw: true,
+  });
+  if (!asignado) {
+    res.send({
+      result: {},
+      success: false,
+      errors: [`El cliente ${cliente} no esta asignado a las rutas de esta handheld`],
+    });
+    return null;
+  }
+  return cliente;
+};
+
+const limpiarFila = (fila) =>
+  Object.fromEntries(Object.entries(fila).map(([k, v]) => [k, typeof v === "string" ? v.trim() : v]));
+const llaveDoc = (cia, num) => `${String(cia).trim()}|${String(num).trim()}`;
+
+// Agrupa filas { _CIA, _DOC, ...resto } por documento.
+const agruparPorDocumento = (filas) => {
+  const porDoc = new Map();
+  for (const { _CIA, _DOC, ...fila } of filas) {
+    const k = llaveDoc(_CIA, _DOC);
+    if (!porDoc.has(k)) porDoc.set(k, []);
+    porDoc.get(k).push(limpiarFila(fila));
+  }
+  return porDoc;
+};
+
+const SIN_MONTOS = { totalMercaderia: 0, descuentoVolumen: 0, subtotal: 0, iva: 0, granTotal: 0 };
+
+// Montos sobre una expresion de monto por linea (`monto`), limitados a las lineas que cumplan `donde`.
+const sqlMontos = (monto) => `
+  ISNULL(SUM(${monto}), 0) AS totalMercaderia,
+  ISNULL(SUM(CASE WHEN D.EST_BON = 'B' THEN ${monto} END), 0) AS descuentoVolumen,
+  ISNULL(SUM(CASE WHEN D.EST_BON = 'V' THEN ${monto} END), 0) AS subtotal,
+  ISNULL(SUM(CASE WHEN D.EST_BON = 'V' THEN ${monto} END), 0) * 0.13 AS iva,
+  ISNULL(SUM(CASE WHEN D.EST_BON = 'V' THEN ${monto} END), 0) * 1.13 AS granTotal`;
+
+//
+// GET /fr/sync/historialPedidos?cliente=04372   (header Authorization: Bearer <token movil>)
+// Historial de PEDIDOS de UN cliente (el seleccionado en la app), solo en las rutas de la handheld.
+//
+// Tablas:
+//   - erpadmin.RUTA_CLIENTE       -> el cliente debe estar en alguna ruta de la handheld
+//   - erpadmin.alFAC_ENC_HIST_PED -> encabezados con COD_CLT = cliente y COD_ZON en las rutas del token
+//   - erpadmin.alFAC_DET_HIST_PED -> sus lineas (unidas por COD_CIA + NUM_PED)
+//   - erpadmin.alFAC_ENC_HIST_FAC -> SOLO los NUM_FAC que salieron de cada pedido (referencia)
+// Es independiente de GET /fr/sync/historialFacturas: la app no necesita llamarlo para mostrar
+// pedidos. `facturas` es solo un atajo opcional para abrir la factura en ese otro endpoint.
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     cliente: "04372",
+//     historial: [{
+//       encabezado: { COD_CIA, NUM_PED, MON_PED, EST_PED, COD_CLT, COD_ZON, FEC_PED, DESC1, DESC2,
+//                     MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL },
+//       facturas: ["DTE-03-..."],                        -> NUM_FAC con ese NUM_PED (incluye anuladas)
+//       lineas: [{ COD_ART, NUM_LN, EST_BON, EST_LN, facturada, cantidad, precio, MONT_DESC, PRC_DESC,
+//                  totalLinea }],                        -> por NUM_LN
+//       montos: { totalMercaderia, descuentoVolumen, subtotal, iva, granTotal } | null
+//     }]
+//   }
+// }
+//
+// Notas:
+//  - Al facturar una linea (EST_LN 'F') el ERP pasa la cantidad de CANT_PED a CANT_FAC y deja MONT_LN
+//    en 0 (MONT_DESC se queda). Por eso:
+//      cantidad   = CANT_PED si EST_LN = 'N', CANT_FAC si EST_LN = 'F'
+//      precio     = MONT_LN / cantidad          (null si la linea esta facturada o cantidad = 0)
+//      totalLinea = MONT_LN - MONT_DESC         (null si la linea esta facturada)
+//    No se rellenan desde las facturas: emparejar linea de pedido con linea de factura (pedido +
+//    articulo + EST_BON) solo coincide en cantidad ~81% de las veces (nov 2026), no es confiable.
+//  - montos: solo sobre las lineas pendientes (EST_LN = 'N'), con (MONT_LN - MONT_DESC):
+//      totalMercaderia = todas, descuentoVolumen = EST_BON 'B', subtotal = EST_BON 'V',
+//      iva = subtotal * 0.13, granTotal = subtotal * 1.13.
+//    null si el pedido no tiene lineas pendientes (todo facturado).
+//  - Un mismo pedido repetido en dos rutas sale una sola vez (con la menor de mis rutas).
+//  - Orden: fecha descendente. FEC_PED como texto 'YYYY-MM-DD HH:MM:SS'. Textos sin espacios al final.
+const getSyncHistorialPedidos = async (req, res) => {
+  try {
+    const cliente = await clienteDeMisRutas(req, res);
+    if (!cliente) return;
+
+    const replacements = { rutas: req.mobile.codigosRuta, cliente };
+    const filtro = "E.COD_ZON IN (:rutas) AND E.COD_CLT = :cliente";
+    // EXISTS (no JOIN) para no duplicar lineas si el pedido esta en dos rutas.
+    const deMisPedidos = `EXISTS (SELECT 1 FROM COAGRO2.erpadmin.alFAC_ENC_HIST_PED E
+                                   WHERE E.COD_CIA = D.COD_CIA AND E.NUM_PED = D.NUM_PED AND ${filtro})`;
+    const cantidad = "CASE WHEN D.EST_LN = 'F' THEN D.CANT_FAC ELSE D.CANT_PED END";
+
+    const [encabezados, lineas, montos, facturas] = await Promise.all([
+      sequelize.query(
+        `SELECT COD_CIA, NUM_PED, MON_PED, EST_PED, COD_CLT, COD_ZON, FEC_PED, DESC1, DESC2,
+                MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL
+           FROM (SELECT E.COD_CIA, E.NUM_PED, E.MON_PED, E.EST_PED, E.COD_CLT, E.COD_ZON,
+                        CONVERT(varchar(19), E.FEC_PED, 120) AS FEC_PED, E.FEC_PED AS _FECHA,
+                        E.DESC1, E.DESC2, E.MONT_DESC1, E.MONT_DESC2, E.ACTIVIDAD_COMERCIAL,
+                        ROW_NUMBER() OVER (PARTITION BY E.COD_CIA, E.NUM_PED ORDER BY E.COD_ZON) AS _N
+                   FROM COAGRO2.erpadmin.alFAC_ENC_HIST_PED E
+                  WHERE ${filtro}) P
+          WHERE _N = 1
+          ORDER BY _FECHA DESC, NUM_PED`,
+        { replacements, type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT D.COD_CIA AS _CIA, D.NUM_PED AS _DOC,
+                D.COD_ART, D.NUM_LN, D.EST_BON, D.EST_LN,
+                CAST(CASE WHEN D.EST_LN = 'F' THEN 1 ELSE 0 END AS bit) AS facturada,
+                ${cantidad} AS cantidad,
+                CASE WHEN D.EST_LN = 'F' THEN NULL ELSE D.MONT_LN / NULLIF(${cantidad}, 0) END AS precio,
+                D.MONT_DESC, D.PRC_DESC,
+                CASE WHEN D.EST_LN = 'F' THEN NULL ELSE D.MONT_LN - D.MONT_DESC END AS totalLinea
+           FROM COAGRO2.erpadmin.alFAC_DET_HIST_PED D
+          WHERE ${deMisPedidos}
+          ORDER BY D.COD_CIA, D.NUM_PED, D.NUM_LN`,
+        { replacements, type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT D.COD_CIA AS _CIA, D.NUM_PED AS _DOC, ${sqlMontos("(D.MONT_LN - D.MONT_DESC)")}
+           FROM COAGRO2.erpadmin.alFAC_DET_HIST_PED D
+          WHERE D.EST_LN <> 'F' AND ${deMisPedidos}
+          GROUP BY D.COD_CIA, D.NUM_PED`,
+        { replacements, type: QueryTypes.SELECT }
+      ),
+      // Mismo filtro (cliente + mis rutas) que GET /fr/sync/historialFacturas, para que todo NUM_FAC
+      // de aqui exista alla.
+      sequelize.query(
+        `SELECT DISTINCT F.COD_CIA AS _CIA, F.NUM_PED AS _DOC, F.NUM_FAC
+           FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC F
+          WHERE F.COD_CLT = :cliente AND F.COD_ZON IN (:rutas) AND F.NUM_PED IS NOT NULL
+          ORDER BY F.NUM_FAC`,
+        { replacements, type: QueryTypes.SELECT }
+      ),
+    ]);
+
+    const lineasPorPedido = agruparPorDocumento(lineas);
+    const facturasPorPedido = agruparPorDocumento(facturas);
+    const montosPorPedido = new Map(montos.map(({ _CIA, _DOC, ...m }) => [llaveDoc(_CIA, _DOC), m]));
+
+    const historial = encabezados.map((e) => {
+      const encabezado = limpiarFila(e);
+      const k = llaveDoc(encabezado.COD_CIA, encabezado.NUM_PED);
+      return {
+        encabezado,
+        facturas: (facturasPorPedido.get(k) || []).map((f) => f.NUM_FAC),
+        lineas: lineasPorPedido.get(k) || [],
+        montos: montosPorPedido.get(k) || null,
+      };
+    });
+
+    res.send({
+      result: { cliente, historial },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion del historial de pedidos"],
+    });
+  }
+};
+
+//
+// GET /fr/sync/historialFacturas?cliente=04372   (header Authorization: Bearer <token movil>)
+// Historial de FACTURAS de UN cliente (el seleccionado en la app), solo en las rutas de la handheld,
+// con sus lineas y montos. Cada factura trae el NUM_PED que la origino.
+//
+// Tablas:
+//   - erpadmin.RUTA_CLIENTE       -> el cliente debe estar en alguna ruta de la handheld
+//   - erpadmin.alFAC_ENC_HIST_FAC -> encabezados con COD_CLT = cliente y COD_ZON en las rutas del token
+//   - erpadmin.alFAC_DET_HIST_FAC -> sus lineas (unidas por COD_CIA + NUM_FAC)
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     cliente: "04372",
+//     historial: [{
+//       encabezado: { COD_CIA, NUM_FAC, NUM_PED, MON_FAC, COD_CLT, COD_ZON, FEC_FAC, ANULAR, NCF, COD_CND,
+//                     DESC1, DESC2, MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL, ESTADO_COMPROBANTE },
+//       anulada: false,
+//       lineas: [{ COD_ART, NUM_LN, CANT_FAC, CANT_DEV, PRE_UNI, MONT_LN, MONT_DESC, PRC_DESC, total,
+//                  EST_BON, LOTE }],                     -> por NUM_LN
+//       montos: { totalMercaderia, descuentoVolumen, subtotal, iva, granTotal }
+//     }]
+//   }
+// }
+//
+// Notas:
+//  - En alFAC_DET_HIST_FAC, MONT_LN YA trae el descuento restado (PRE_UNI * CANT_FAC - MONT_DESC),
+//    asi que total = MONT_LN (restarle MONT_DESC contaria el descuento dos veces).
+//    PRC_DESC = MONT_DESC / (PRE_UNI * CANT_FAC) * 100, redondeado a 2 (la tabla no lo trae; 0 si no aplica).
+//  - Montos, todos sobre MONT_LN: totalMercaderia = todas las lineas, descuentoVolumen = EST_BON 'B',
+//    subtotal = EST_BON 'V', iva = subtotal * 0.13, granTotal = subtotal * 1.13 (cuadra con MON_FAC
+//    salvo centavos de redondeo del ERP). Una factura sin lineas de ese tipo lleva 0.
+//  - Anuladas (ANULAR = 'S') SI vienen, con anulada: true, para que la app las marque.
+//  - Una misma factura puede estar dos veces en alFAC_ENC_HIST_FAC con distinto COD_ZON: sale una sola
+//    vez (con la menor de mis rutas) y sus lineas no se duplican.
+//  - Orden: fecha descendente. FEC_FAC como texto 'YYYY-MM-DD HH:MM:SS'. Textos sin espacios al final.
+const getSyncHistorialFacturas = async (req, res) => {
+  try {
+    const cliente = await clienteDeMisRutas(req, res);
+    if (!cliente) return;
+
+    const replacements = { rutas: req.mobile.codigosRuta, cliente };
+    const filtro = "E.COD_ZON IN (:rutas) AND E.COD_CLT = :cliente";
+    // EXISTS (no JOIN) para no duplicar lineas de facturas repetidas en dos rutas.
+    const deMisFacturas = `EXISTS (SELECT 1 FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC E
+                                    WHERE E.COD_CIA = D.COD_CIA AND E.NUM_FAC = D.NUM_FAC AND ${filtro})`;
+
+    const [encabezados, lineas, montos] = await Promise.all([
+      sequelize.query(
+        `SELECT COD_CIA, NUM_FAC, NUM_PED, MON_FAC, COD_CLT, COD_ZON, FEC_FAC, ANULAR, NCF, COD_CND,
+                DESC1, DESC2, MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL, ESTADO_COMPROBANTE
+           FROM (SELECT E.COD_CIA, E.NUM_FAC, E.NUM_PED, E.MON_FAC, E.COD_CLT, E.COD_ZON,
+                        CONVERT(varchar(19), E.FEC_FAC, 120) AS FEC_FAC, E.FEC_FAC AS _FECHA,
+                        E.ANULAR, E.NCF, E.COD_CND, E.DESC1, E.DESC2, E.MONT_DESC1, E.MONT_DESC2,
+                        E.ACTIVIDAD_COMERCIAL, E.ESTADO_COMPROBANTE,
+                        ROW_NUMBER() OVER (PARTITION BY E.COD_CIA, E.NUM_FAC ORDER BY E.COD_ZON) AS _N
+                   FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC E
+                  WHERE ${filtro}) F
+          WHERE _N = 1
+          ORDER BY _FECHA DESC, NUM_FAC`,
+        { replacements, type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT D.COD_CIA AS _CIA, D.NUM_FAC AS _DOC,
+                D.COD_ART, D.NUM_LN, D.CANT_FAC, D.CANT_DEV, D.PRE_UNI, D.MONT_LN, D.MONT_DESC,
+                ISNULL(ROUND(D.MONT_DESC * 100 / NULLIF(D.PRE_UNI * D.CANT_FAC, 0), 2), 0) AS PRC_DESC,
+                D.MONT_LN AS total,
+                D.EST_BON, D.LOTE
+           FROM COAGRO2.erpadmin.alFAC_DET_HIST_FAC D
+          WHERE ${deMisFacturas}
+          ORDER BY D.COD_CIA, D.NUM_FAC, D.NUM_LN`,
+        { replacements, type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT D.COD_CIA AS _CIA, D.NUM_FAC AS _DOC, ${sqlMontos("D.MONT_LN")}
+           FROM COAGRO2.erpadmin.alFAC_DET_HIST_FAC D
+          WHERE ${deMisFacturas}
+          GROUP BY D.COD_CIA, D.NUM_FAC`,
+        { replacements, type: QueryTypes.SELECT }
+      ),
+    ]);
+
+    const lineasPorFactura = agruparPorDocumento(lineas);
+    const montosPorFactura = new Map(montos.map(({ _CIA, _DOC, ...m }) => [llaveDoc(_CIA, _DOC), m]));
+
+    const historial = encabezados.map((e) => {
+      const encabezado = limpiarFila(e);
+      const k = llaveDoc(encabezado.COD_CIA, encabezado.NUM_FAC);
+      return {
+        encabezado,
+        anulada: encabezado.ANULAR === "S",
+        lineas: lineasPorFactura.get(k) || [],
+        montos: montosPorFactura.get(k) || SIN_MONTOS,
+      };
+    });
+
+    res.send({
+      result: { cliente, historial },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion del historial de facturas"],
+    });
+  }
+};
+
 module.exports = {
+  getSyncLotes,
+  getSyncHistorialPedidos,
+  getSyncHistorialFacturas,
   getSyncCotizaciones,
   getSyncClientes,
   getSyncArticulos,
   getSyncCobros,
   getSyncCobrosAgente,
   getSyncConsecutivos,
+  getSyncConfiguracion,
   getSyncClientesCia,
   getSyncPrecios,
 };
