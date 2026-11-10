@@ -907,12 +907,14 @@ const sqlMontos = (monto) => `
 //
 // GET /fr/sync/historialPedidos?cliente=04372   (header Authorization: Bearer <token movil>)
 // Historial de PEDIDOS de UN cliente (el seleccionado en la app), solo en las rutas de la handheld.
+// Para bajar el de todos los clientes de mis rutas en la sincronizacion: GET /fr/sync/historialPedidosRuta.
 //
 // Tablas:
 //   - erpadmin.RUTA_CLIENTE       -> el cliente debe estar en alguna ruta de la handheld
 //   - erpadmin.alFAC_ENC_HIST_PED -> encabezados con COD_CLT = cliente y COD_ZON en las rutas del token
 //   - erpadmin.alFAC_DET_HIST_PED -> sus lineas (unidas por COD_CIA + NUM_PED)
-//   - erpadmin.alFAC_ENC_HIST_FAC -> SOLO los NUM_FAC que salieron de cada pedido (referencia)
+//   - erpadmin.alFAC_ENC_HIST_FAC -> los NUM_FAC que salieron de cada pedido (referencia)
+//   - erpadmin.alFAC_DET_HIST_FAC -> monto real de las lineas ya facturadas (ver Notas)
 // Es independiente de GET /fr/sync/historialFacturas: la app no necesita llamarlo para mostrar
 // pedidos. `facturas` es solo un atajo opcional para abrir la factura en ese otro endpoint.
 //
@@ -927,96 +929,156 @@ const sqlMontos = (monto) => `
 //                     MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL },
 //       facturas: ["DTE-03-..."],                        -> NUM_FAC con ese NUM_PED (incluye anuladas)
 //       lineas: [{ COD_ART, NUM_LN, EST_BON, EST_LN, facturada, cantidad, precio, MONT_DESC, PRC_DESC,
-//                  totalLinea }],                        -> por NUM_LN
+//                  totalLinea, origenMonto }],           -> por NUM_LN
 //       montos: { totalMercaderia, descuentoVolumen, subtotal, iva, granTotal } | null
 //     }]
 //   }
 // }
 //
 // Notas:
-//  - Al facturar una linea (EST_LN 'F') el ERP pasa la cantidad de CANT_PED a CANT_FAC y deja MONT_LN
-//    en 0 (MONT_DESC se queda). Por eso:
-//      cantidad   = CANT_PED si EST_LN = 'N', CANT_FAC si EST_LN = 'F'
-//      precio     = MONT_LN / cantidad          (null si la linea esta facturada o cantidad = 0)
-//      totalLinea = MONT_LN - MONT_DESC         (null si la linea esta facturada)
-//    No se rellenan desde las facturas: emparejar linea de pedido con linea de factura (pedido +
-//    articulo + EST_BON) solo coincide en cantidad ~81% de las veces (nov 2026), no es confiable.
+//  - Lineas pendientes (EST_LN 'N'), origenMonto "pedido":
+//      cantidad = CANT_PED, precio = MONT_LN / cantidad, totalLinea = MONT_LN - MONT_DESC,
+//      MONT_DESC y PRC_DESC del pedido.
+//  - Lineas facturadas (EST_LN 'F'): el ERP deja MONT_LN en 0 en el pedido (y en bonificaciones
+//    tambien CANT_FAC en 0), asi que el monto sale de las lineas de factura del pedido, origenMonto
+//    "factura":
+//      cantidad   = suma de CANT_FAC de esas lineas de factura
+//      precio     = PRE_UNI (si hubo varios precios, el promedio ponderado por cantidad)
+//      totalLinea = suma de MONT_LN (ya trae el descuento restado, igual que en historialFacturas)
+//      MONT_DESC  = suma de MONT_DESC; PRC_DESC = MONT_DESC / (PRE_UNI * CANT_FAC) * 100, a 2 decimales
+//    Emparejamiento: facturas NO anuladas del pedido (cliente + mis rutas) + COD_ART + EST_BON, sumando
+//    entregas parciales. La linea de factura no guarda el numero de linea del pedido (su NUM_LN no
+//    sigue una regla fija), asi que si el mismo COD_ART + EST_BON se repite entre las lineas
+//    facturadas del pedido no se puede saber cual es cual: esas lineas, y las que no aparecen en
+//    ninguna factura, quedan con precio y totalLinea null, origenMonto null y los datos del pedido
+//    (cantidad = CANT_FAC del pedido).
 //  - montos: solo sobre las lineas pendientes (EST_LN = 'N'), con (MONT_LN - MONT_DESC):
 //      totalMercaderia = todas, descuentoVolumen = EST_BON 'B', subtotal = EST_BON 'V',
 //      iva = subtotal * 0.13, granTotal = subtotal * 1.13.
 //    null si el pedido no tiene lineas pendientes (todo facturado).
 //  - Un mismo pedido repetido en dos rutas sale una sola vez (con la menor de mis rutas).
 //  - Orden: fecha descendente. FEC_PED como texto 'YYYY-MM-DD HH:MM:SS'. Textos sin espacios al final.
+
+// Arma el historial de pedidos que cumplen `filtro` (condicion SQL sobre alFAC_ENC_HIST_PED con alias E;
+// siempre incluye E.COD_ZON IN (:rutas)). Pocas consultas en bloque, unidas en memoria.
+const historialPedidos = async ({ filtro, replacements, orden }) => {
+  // EXISTS (no JOIN) para no duplicar lineas si el pedido esta en dos rutas.
+  const deMisPedidos = `EXISTS (SELECT 1 FROM COAGRO2.erpadmin.alFAC_ENC_HIST_PED E
+                                 WHERE E.COD_CIA = D.COD_CIA AND E.NUM_PED = D.NUM_PED AND ${filtro})`;
+  // Facturas de mis rutas que salieron de esos pedidos (mismo cliente que el pedido).
+  const facturasDeMisPedidos = `F.COD_ZON IN (:rutas) AND F.NUM_PED IS NOT NULL
+      AND EXISTS (SELECT 1 FROM COAGRO2.erpadmin.alFAC_ENC_HIST_PED E
+                   WHERE E.COD_CIA = F.COD_CIA AND E.NUM_PED = F.NUM_PED AND E.COD_CLT = F.COD_CLT AND ${filtro})`;
+  const cantidad = "CASE WHEN D.EST_LN = 'F' THEN D.CANT_FAC ELSE D.CANT_PED END";
+
+  const [encabezados, lineas, montos, facturas, facturado] = await Promise.all([
+    sequelize.query(
+      `SELECT COD_CIA, NUM_PED, MON_PED, EST_PED, COD_CLT, COD_ZON, FEC_PED, DESC1, DESC2,
+              MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL
+         FROM (SELECT E.COD_CIA, E.NUM_PED, E.MON_PED, E.EST_PED, E.COD_CLT, E.COD_ZON,
+                      CONVERT(varchar(19), E.FEC_PED, 120) AS FEC_PED, E.FEC_PED AS _FECHA,
+                      E.DESC1, E.DESC2, E.MONT_DESC1, E.MONT_DESC2, E.ACTIVIDAD_COMERCIAL,
+                      ROW_NUMBER() OVER (PARTITION BY E.COD_CIA, E.NUM_PED ORDER BY E.COD_ZON) AS _N
+                 FROM COAGRO2.erpadmin.alFAC_ENC_HIST_PED E
+                WHERE ${filtro}) P
+        WHERE _N = 1
+        ORDER BY ${orden}, NUM_PED`,
+      { replacements, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT D.COD_CIA AS _CIA, D.NUM_PED AS _DOC,
+              D.COD_ART, D.NUM_LN, D.EST_BON, D.EST_LN,
+              CAST(CASE WHEN D.EST_LN = 'F' THEN 1 ELSE 0 END AS bit) AS facturada,
+              ${cantidad} AS cantidad,
+              CASE WHEN D.EST_LN = 'F' THEN NULL ELSE D.MONT_LN / NULLIF(${cantidad}, 0) END AS precio,
+              D.MONT_DESC, D.PRC_DESC,
+              CASE WHEN D.EST_LN = 'F' THEN NULL ELSE D.MONT_LN - D.MONT_DESC END AS totalLinea
+         FROM COAGRO2.erpadmin.alFAC_DET_HIST_PED D
+        WHERE ${deMisPedidos}
+        ORDER BY D.COD_CIA, D.NUM_PED, D.NUM_LN`,
+      { replacements, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT D.COD_CIA AS _CIA, D.NUM_PED AS _DOC, ${sqlMontos("(D.MONT_LN - D.MONT_DESC)")}
+         FROM COAGRO2.erpadmin.alFAC_DET_HIST_PED D
+        WHERE D.EST_LN <> 'F' AND ${deMisPedidos}
+        GROUP BY D.COD_CIA, D.NUM_PED`,
+      { replacements, type: QueryTypes.SELECT }
+    ),
+    // Mismo criterio de rutas que historialFacturas, para que todo NUM_FAC de aqui exista alla.
+    sequelize.query(
+      `SELECT DISTINCT F.COD_CIA AS _CIA, F.NUM_PED AS _DOC, F.NUM_FAC
+         FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC F
+        WHERE ${facturasDeMisPedidos}
+        ORDER BY F.NUM_FAC`,
+      { replacements, type: QueryTypes.SELECT }
+    ),
+    // Lo facturado por pedido + articulo + EST_BON (facturas no anuladas, sumando entregas parciales).
+    // DISTINCT en el encabezado: una factura puede estar repetida en dos rutas.
+    sequelize.query(
+      `SELECT F.COD_CIA AS _CIA, F.NUM_PED AS _DOC, L.COD_ART, L.EST_BON,
+              SUM(L.CANT_FAC) AS cantidad,
+              CASE WHEN COUNT(DISTINCT L.PRE_UNI) = 1 THEN MIN(L.PRE_UNI)
+                   ELSE SUM(L.PRE_UNI * L.CANT_FAC) / NULLIF(SUM(L.CANT_FAC), 0) END AS precio,
+              SUM(L.MONT_DESC) AS MONT_DESC,
+              ISNULL(ROUND(SUM(L.MONT_DESC) * 100 / NULLIF(SUM(L.PRE_UNI * L.CANT_FAC), 0), 2), 0) AS PRC_DESC,
+              SUM(L.MONT_LN) AS totalLinea
+         FROM COAGRO2.erpadmin.alFAC_DET_HIST_FAC L
+         JOIN (SELECT DISTINCT F.COD_CIA, F.NUM_FAC, F.NUM_PED
+                 FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC F
+                WHERE ${facturasDeMisPedidos} AND ISNULL(F.ANULAR, 'N') <> 'S') F
+           ON F.COD_CIA = L.COD_CIA AND F.NUM_FAC = L.NUM_FAC
+        GROUP BY F.COD_CIA, F.NUM_PED, L.COD_ART, L.EST_BON`,
+      { replacements, type: QueryTypes.SELECT }
+    ),
+  ]);
+
+  const lineasPorPedido = agruparPorDocumento(lineas);
+  const facturasPorPedido = agruparPorDocumento(facturas);
+  const montosPorPedido = new Map(montos.map(({ _CIA, _DOC, ...m }) => [llaveDoc(_CIA, _DOC), m]));
+  const llaveArt = (cia, ped, art, bon) => `${llaveDoc(cia, ped)}|${String(art).trim()}|${String(bon).trim()}`;
+  const facturadoPorArticulo = new Map(
+    facturado.map(({ _CIA, _DOC, COD_ART, EST_BON, ...f }) => [llaveArt(_CIA, _DOC, COD_ART, EST_BON), f])
+  );
+
+  // Lineas facturadas toman el monto de la factura cuando su COD_ART + EST_BON es unico entre las
+  // lineas facturadas del pedido; si se repite no se sabe a cual corresponde cada linea de factura.
+  const completarLineas = (cia, ped, lineasPedido) => {
+    const repeticiones = new Map();
+    for (const l of lineasPedido) {
+      if (!l.facturada) continue;
+      const k = llaveArt(cia, ped, l.COD_ART, l.EST_BON);
+      repeticiones.set(k, (repeticiones.get(k) || 0) + 1);
+    }
+    return lineasPedido.map((l) => {
+      if (!l.facturada) return { ...l, origenMonto: "pedido" };
+      const k = llaveArt(cia, ped, l.COD_ART, l.EST_BON);
+      const f = repeticiones.get(k) === 1 ? facturadoPorArticulo.get(k) : null;
+      return f ? { ...l, ...f, origenMonto: "factura" } : { ...l, origenMonto: null };
+    });
+  };
+
+  return encabezados.map((e) => {
+    const encabezado = limpiarFila(e);
+    const k = llaveDoc(encabezado.COD_CIA, encabezado.NUM_PED);
+    return {
+      encabezado,
+      facturas: (facturasPorPedido.get(k) || []).map((f) => f.NUM_FAC),
+      lineas: completarLineas(encabezado.COD_CIA, encabezado.NUM_PED, lineasPorPedido.get(k) || []),
+      montos: montosPorPedido.get(k) || null,
+    };
+  });
+};
+
 const getSyncHistorialPedidos = async (req, res) => {
   try {
     const cliente = await clienteDeMisRutas(req, res);
     if (!cliente) return;
 
-    const replacements = { rutas: req.mobile.codigosRuta, cliente };
-    const filtro = "E.COD_ZON IN (:rutas) AND E.COD_CLT = :cliente";
-    // EXISTS (no JOIN) para no duplicar lineas si el pedido esta en dos rutas.
-    const deMisPedidos = `EXISTS (SELECT 1 FROM COAGRO2.erpadmin.alFAC_ENC_HIST_PED E
-                                   WHERE E.COD_CIA = D.COD_CIA AND E.NUM_PED = D.NUM_PED AND ${filtro})`;
-    const cantidad = "CASE WHEN D.EST_LN = 'F' THEN D.CANT_FAC ELSE D.CANT_PED END";
-
-    const [encabezados, lineas, montos, facturas] = await Promise.all([
-      sequelize.query(
-        `SELECT COD_CIA, NUM_PED, MON_PED, EST_PED, COD_CLT, COD_ZON, FEC_PED, DESC1, DESC2,
-                MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL
-           FROM (SELECT E.COD_CIA, E.NUM_PED, E.MON_PED, E.EST_PED, E.COD_CLT, E.COD_ZON,
-                        CONVERT(varchar(19), E.FEC_PED, 120) AS FEC_PED, E.FEC_PED AS _FECHA,
-                        E.DESC1, E.DESC2, E.MONT_DESC1, E.MONT_DESC2, E.ACTIVIDAD_COMERCIAL,
-                        ROW_NUMBER() OVER (PARTITION BY E.COD_CIA, E.NUM_PED ORDER BY E.COD_ZON) AS _N
-                   FROM COAGRO2.erpadmin.alFAC_ENC_HIST_PED E
-                  WHERE ${filtro}) P
-          WHERE _N = 1
-          ORDER BY _FECHA DESC, NUM_PED`,
-        { replacements, type: QueryTypes.SELECT }
-      ),
-      sequelize.query(
-        `SELECT D.COD_CIA AS _CIA, D.NUM_PED AS _DOC,
-                D.COD_ART, D.NUM_LN, D.EST_BON, D.EST_LN,
-                CAST(CASE WHEN D.EST_LN = 'F' THEN 1 ELSE 0 END AS bit) AS facturada,
-                ${cantidad} AS cantidad,
-                CASE WHEN D.EST_LN = 'F' THEN NULL ELSE D.MONT_LN / NULLIF(${cantidad}, 0) END AS precio,
-                D.MONT_DESC, D.PRC_DESC,
-                CASE WHEN D.EST_LN = 'F' THEN NULL ELSE D.MONT_LN - D.MONT_DESC END AS totalLinea
-           FROM COAGRO2.erpadmin.alFAC_DET_HIST_PED D
-          WHERE ${deMisPedidos}
-          ORDER BY D.COD_CIA, D.NUM_PED, D.NUM_LN`,
-        { replacements, type: QueryTypes.SELECT }
-      ),
-      sequelize.query(
-        `SELECT D.COD_CIA AS _CIA, D.NUM_PED AS _DOC, ${sqlMontos("(D.MONT_LN - D.MONT_DESC)")}
-           FROM COAGRO2.erpadmin.alFAC_DET_HIST_PED D
-          WHERE D.EST_LN <> 'F' AND ${deMisPedidos}
-          GROUP BY D.COD_CIA, D.NUM_PED`,
-        { replacements, type: QueryTypes.SELECT }
-      ),
-      // Mismo filtro (cliente + mis rutas) que GET /fr/sync/historialFacturas, para que todo NUM_FAC
-      // de aqui exista alla.
-      sequelize.query(
-        `SELECT DISTINCT F.COD_CIA AS _CIA, F.NUM_PED AS _DOC, F.NUM_FAC
-           FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC F
-          WHERE F.COD_CLT = :cliente AND F.COD_ZON IN (:rutas) AND F.NUM_PED IS NOT NULL
-          ORDER BY F.NUM_FAC`,
-        { replacements, type: QueryTypes.SELECT }
-      ),
-    ]);
-
-    const lineasPorPedido = agruparPorDocumento(lineas);
-    const facturasPorPedido = agruparPorDocumento(facturas);
-    const montosPorPedido = new Map(montos.map(({ _CIA, _DOC, ...m }) => [llaveDoc(_CIA, _DOC), m]));
-
-    const historial = encabezados.map((e) => {
-      const encabezado = limpiarFila(e);
-      const k = llaveDoc(encabezado.COD_CIA, encabezado.NUM_PED);
-      return {
-        encabezado,
-        facturas: (facturasPorPedido.get(k) || []).map((f) => f.NUM_FAC),
-        lineas: lineasPorPedido.get(k) || [],
-        montos: montosPorPedido.get(k) || null,
-      };
+    const historial = await historialPedidos({
+      filtro: "E.COD_ZON IN (:rutas) AND E.COD_CLT = :cliente",
+      replacements: { rutas: req.mobile.codigosRuta, cliente },
+      orden: "_FECHA DESC",
     });
 
     res.send({
@@ -1038,6 +1100,7 @@ const getSyncHistorialPedidos = async (req, res) => {
 // GET /fr/sync/historialFacturas?cliente=04372   (header Authorization: Bearer <token movil>)
 // Historial de FACTURAS de UN cliente (el seleccionado en la app), solo en las rutas de la handheld,
 // con sus lineas y montos. Cada factura trae el NUM_PED que la origino.
+// Para bajar el de todos los clientes de mis rutas en la sincronizacion: GET /fr/sync/historialFacturasRuta.
 //
 // Tablas:
 //   - erpadmin.RUTA_CLIENTE       -> el cliente debe estar en alguna ruta de la handheld
@@ -1072,64 +1135,73 @@ const getSyncHistorialPedidos = async (req, res) => {
 //  - Una misma factura puede estar dos veces en alFAC_ENC_HIST_FAC con distinto COD_ZON: sale una sola
 //    vez (con la menor de mis rutas) y sus lineas no se duplican.
 //  - Orden: fecha descendente. FEC_FAC como texto 'YYYY-MM-DD HH:MM:SS'. Textos sin espacios al final.
+
+// Arma el historial de facturas que cumplen `filtro` (condicion SQL sobre alFAC_ENC_HIST_FAC con alias E;
+// siempre incluye E.COD_ZON IN (:rutas)). Pocas consultas en bloque, unidas en memoria.
+const historialFacturas = async ({ filtro, replacements, orden }) => {
+  // EXISTS (no JOIN) para no duplicar lineas de facturas repetidas en dos rutas.
+  const deMisFacturas = `EXISTS (SELECT 1 FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC E
+                                  WHERE E.COD_CIA = D.COD_CIA AND E.NUM_FAC = D.NUM_FAC AND ${filtro})`;
+
+  const [encabezados, lineas, montos] = await Promise.all([
+    sequelize.query(
+      `SELECT COD_CIA, NUM_FAC, NUM_PED, MON_FAC, COD_CLT, COD_ZON, FEC_FAC, ANULAR, NCF, COD_CND,
+              DESC1, DESC2, MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL, ESTADO_COMPROBANTE
+         FROM (SELECT E.COD_CIA, E.NUM_FAC, E.NUM_PED, E.MON_FAC, E.COD_CLT, E.COD_ZON,
+                      CONVERT(varchar(19), E.FEC_FAC, 120) AS FEC_FAC, E.FEC_FAC AS _FECHA,
+                      E.ANULAR, E.NCF, E.COD_CND, E.DESC1, E.DESC2, E.MONT_DESC1, E.MONT_DESC2,
+                      E.ACTIVIDAD_COMERCIAL, E.ESTADO_COMPROBANTE,
+                      ROW_NUMBER() OVER (PARTITION BY E.COD_CIA, E.NUM_FAC ORDER BY E.COD_ZON) AS _N
+                 FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC E
+                WHERE ${filtro}) F
+        WHERE _N = 1
+        ORDER BY ${orden}, NUM_FAC`,
+      { replacements, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT D.COD_CIA AS _CIA, D.NUM_FAC AS _DOC,
+              D.COD_ART, D.NUM_LN, D.CANT_FAC, D.CANT_DEV, D.PRE_UNI, D.MONT_LN, D.MONT_DESC,
+              ISNULL(ROUND(D.MONT_DESC * 100 / NULLIF(D.PRE_UNI * D.CANT_FAC, 0), 2), 0) AS PRC_DESC,
+              D.MONT_LN AS total,
+              D.EST_BON, D.LOTE
+         FROM COAGRO2.erpadmin.alFAC_DET_HIST_FAC D
+        WHERE ${deMisFacturas}
+        ORDER BY D.COD_CIA, D.NUM_FAC, D.NUM_LN`,
+      { replacements, type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT D.COD_CIA AS _CIA, D.NUM_FAC AS _DOC, ${sqlMontos("D.MONT_LN")}
+         FROM COAGRO2.erpadmin.alFAC_DET_HIST_FAC D
+        WHERE ${deMisFacturas}
+        GROUP BY D.COD_CIA, D.NUM_FAC`,
+      { replacements, type: QueryTypes.SELECT }
+    ),
+  ]);
+
+  const lineasPorFactura = agruparPorDocumento(lineas);
+  const montosPorFactura = new Map(montos.map(({ _CIA, _DOC, ...m }) => [llaveDoc(_CIA, _DOC), m]));
+
+  return encabezados.map((e) => {
+    const encabezado = limpiarFila(e);
+    const k = llaveDoc(encabezado.COD_CIA, encabezado.NUM_FAC);
+    return {
+      encabezado,
+      anulada: encabezado.ANULAR === "S",
+      lineas: lineasPorFactura.get(k) || [],
+      montos: montosPorFactura.get(k) || SIN_MONTOS,
+    };
+  });
+};
+
 const getSyncHistorialFacturas = async (req, res) => {
   try {
     const cliente = await clienteDeMisRutas(req, res);
     if (!cliente) return;
 
-    const replacements = { rutas: req.mobile.codigosRuta, cliente };
-    const filtro = "E.COD_ZON IN (:rutas) AND E.COD_CLT = :cliente";
-    // EXISTS (no JOIN) para no duplicar lineas de facturas repetidas en dos rutas.
-    const deMisFacturas = `EXISTS (SELECT 1 FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC E
-                                    WHERE E.COD_CIA = D.COD_CIA AND E.NUM_FAC = D.NUM_FAC AND ${filtro})`;
-
-    const [encabezados, lineas, montos] = await Promise.all([
-      sequelize.query(
-        `SELECT COD_CIA, NUM_FAC, NUM_PED, MON_FAC, COD_CLT, COD_ZON, FEC_FAC, ANULAR, NCF, COD_CND,
-                DESC1, DESC2, MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL, ESTADO_COMPROBANTE
-           FROM (SELECT E.COD_CIA, E.NUM_FAC, E.NUM_PED, E.MON_FAC, E.COD_CLT, E.COD_ZON,
-                        CONVERT(varchar(19), E.FEC_FAC, 120) AS FEC_FAC, E.FEC_FAC AS _FECHA,
-                        E.ANULAR, E.NCF, E.COD_CND, E.DESC1, E.DESC2, E.MONT_DESC1, E.MONT_DESC2,
-                        E.ACTIVIDAD_COMERCIAL, E.ESTADO_COMPROBANTE,
-                        ROW_NUMBER() OVER (PARTITION BY E.COD_CIA, E.NUM_FAC ORDER BY E.COD_ZON) AS _N
-                   FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC E
-                  WHERE ${filtro}) F
-          WHERE _N = 1
-          ORDER BY _FECHA DESC, NUM_FAC`,
-        { replacements, type: QueryTypes.SELECT }
-      ),
-      sequelize.query(
-        `SELECT D.COD_CIA AS _CIA, D.NUM_FAC AS _DOC,
-                D.COD_ART, D.NUM_LN, D.CANT_FAC, D.CANT_DEV, D.PRE_UNI, D.MONT_LN, D.MONT_DESC,
-                ISNULL(ROUND(D.MONT_DESC * 100 / NULLIF(D.PRE_UNI * D.CANT_FAC, 0), 2), 0) AS PRC_DESC,
-                D.MONT_LN AS total,
-                D.EST_BON, D.LOTE
-           FROM COAGRO2.erpadmin.alFAC_DET_HIST_FAC D
-          WHERE ${deMisFacturas}
-          ORDER BY D.COD_CIA, D.NUM_FAC, D.NUM_LN`,
-        { replacements, type: QueryTypes.SELECT }
-      ),
-      sequelize.query(
-        `SELECT D.COD_CIA AS _CIA, D.NUM_FAC AS _DOC, ${sqlMontos("D.MONT_LN")}
-           FROM COAGRO2.erpadmin.alFAC_DET_HIST_FAC D
-          WHERE ${deMisFacturas}
-          GROUP BY D.COD_CIA, D.NUM_FAC`,
-        { replacements, type: QueryTypes.SELECT }
-      ),
-    ]);
-
-    const lineasPorFactura = agruparPorDocumento(lineas);
-    const montosPorFactura = new Map(montos.map(({ _CIA, _DOC, ...m }) => [llaveDoc(_CIA, _DOC), m]));
-
-    const historial = encabezados.map((e) => {
-      const encabezado = limpiarFila(e);
-      const k = llaveDoc(encabezado.COD_CIA, encabezado.NUM_FAC);
-      return {
-        encabezado,
-        anulada: encabezado.ANULAR === "S",
-        lineas: lineasPorFactura.get(k) || [],
-        montos: montosPorFactura.get(k) || SIN_MONTOS,
-      };
+    const historial = await historialFacturas({
+      filtro: "E.COD_ZON IN (:rutas) AND E.COD_CLT = :cliente",
+      replacements: { rutas: req.mobile.codigosRuta, cliente },
+      orden: "_FECHA DESC",
     });
 
     res.send({
@@ -1147,10 +1219,93 @@ const getSyncHistorialFacturas = async (req, res) => {
   }
 };
 
+//
+// GET /fr/sync/historialPedidosRuta?meses=3    (header Authorization: Bearer <token movil>)
+// GET /fr/sync/historialFacturasRuta?meses=3   (header Authorization: Bearer <token movil>)
+// Historial de pedidos / facturas de TODOS los clientes de mis rutas, para bajarlo en la
+// sincronizacion general ("Cargar datos") y consultarlo sin conexion. Los endpoints por cliente
+// (historialPedidos / historialFacturas ?cliente=) siguen igual para refrescar un cliente en linea.
+//
+// Filtro: COD_ZON en las rutas de la handheld del token, COD_CLT asignado a alguna de esas rutas en
+// RUTA_CLIENTE (lo mismo que exige el endpoint por cliente) y fecha (FEC_PED / FEC_FAC) >= hoy - meses.
+// `meses`: opcional, entero de 1 a 12 (por defecto 3; mayor a 12 se usa 12; invalido se usa 3).
+//
+// Respuesta: los MISMOS objetos del endpoint por cliente (mismos campos y reglas), con `meses` en vez
+// de `cliente`:
+// { success: true, errors: [], result: { meses: 3, historial: [ ... ] } }
+//
+// Notas:
+//  - Orden: COD_CLT y, dentro de cada cliente, fecha descendente (mas reciente primero).
+//  - En pedidos, `facturas` y el monto de las lineas facturadas salen de facturas de cualquier fecha
+//    (una factura puede ser posterior a la ventana de su pedido); el limite de meses aplica al pedido.
+//  - Una ruta sin documentos responde historial: [] (no es error).
+const MESES_DEFECTO = 3;
+const MESES_MAX = 12;
+const mesesHistorial = (valor) => {
+  const meses = parseInt(valor, 10);
+  if (!Number.isInteger(meses) || meses < 1) return MESES_DEFECTO;
+  return Math.min(meses, MESES_MAX);
+};
+// Clientes asignados a mis rutas: mismo criterio que clienteDeMisRutas.
+const DE_MIS_CLIENTES = `E.COD_ZON IN (:rutas)
+  AND E.COD_CLT IN (SELECT CLIENTE FROM COAGRO2.erpadmin.RUTA_CLIENTE WHERE RUTA IN (:rutas))`;
+// "-1 * :meses" y no "-:meses": Sequelize no reemplaza un :parametro pegado al signo menos.
+const DESDE_MESES = "DATEADD(month, -1 * :meses, CAST(GETDATE() AS date))";
+
+const getSyncHistorialPedidosRuta = async (req, res) => {
+  try {
+    const meses = mesesHistorial(req.query.meses);
+    const historial = await historialPedidos({
+      filtro: `${DE_MIS_CLIENTES} AND E.FEC_PED >= ${DESDE_MESES}`,
+      replacements: { rutas: req.mobile.codigosRuta, meses },
+      orden: "COD_CLT, _FECHA DESC",
+    });
+
+    res.send({
+      result: { meses, historial },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion del historial de pedidos"],
+    });
+  }
+};
+
+const getSyncHistorialFacturasRuta = async (req, res) => {
+  try {
+    const meses = mesesHistorial(req.query.meses);
+    const historial = await historialFacturas({
+      filtro: `${DE_MIS_CLIENTES} AND E.FEC_FAC >= ${DESDE_MESES}`,
+      replacements: { rutas: req.mobile.codigosRuta, meses },
+      orden: "COD_CLT, _FECHA DESC",
+    });
+
+    res.send({
+      result: { meses, historial },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion del historial de facturas"],
+    });
+  }
+};
+
 module.exports = {
   getSyncLotes,
   getSyncHistorialPedidos,
   getSyncHistorialFacturas,
+  getSyncHistorialPedidosRuta,
+  getSyncHistorialFacturasRuta,
   getSyncCotizaciones,
   getSyncClientes,
   getSyncArticulos,
