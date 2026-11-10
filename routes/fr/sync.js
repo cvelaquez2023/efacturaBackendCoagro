@@ -1,7 +1,7 @@
 // Sincronizacion de la handheld. Exige el token de POST /fr/mobile/login
 // (header Authorization: Bearer <token>) y rol RUTA. Las rutas salen de la
 // handheld del token (RUTA_ASIGNADA_RT), no de la URL.
-// Queda como GET /fr/sync/clientes, /clientesCia, /articulos, /precios, /cobros, /cobrosAgente, /consecutivos y /cotizaciones,
+// Queda como GET /fr/sync/clientes, /clientesCia, /articulos, /lotes, /precios, /cobros, /cobrosAgente, /consecutivos, /configuracion, /cotizaciones, /historialPedidos y /historialFacturas,
 // y POST /fr/sync/enviar (la handheld sube lo registrado sin conexion).
 
 const { Router } = require("express");
@@ -14,9 +14,13 @@ const {
   getSyncCobros,
   getSyncCobrosAgente,
   getSyncConsecutivos,
+  getSyncConfiguracion,
   getSyncClientesCia,
   getSyncPrecios,
   getSyncCotizaciones,
+  getSyncHistorialPedidos,
+  getSyncHistorialFacturas,
+  getSyncLotes,
 } = require("../../controllers/fr/sync");
 const { postSyncEnviar } = require("../../controllers/fr/syncEnviar");
 
@@ -29,12 +33,16 @@ router.use(mobileSession, checkRol(["RUTA"]));
 
 router.get("/clientes", getSyncClientes);
 router.get("/articulos", getSyncArticulos);
+router.get("/lotes", getSyncLotes);
 router.get("/cobros", getSyncCobros);
 router.get("/cobrosAgente", getSyncCobrosAgente);
 router.get("/consecutivos", getSyncConsecutivos);
+router.get("/configuracion", getSyncConfiguracion);
 router.get("/clientesCia", getSyncClientesCia);
 router.get("/precios", getSyncPrecios);
 router.get("/cotizaciones", getSyncCotizaciones);
+router.get("/historialPedidos", getSyncHistorialPedidos);
+router.get("/historialFacturas", getSyncHistorialFacturas);
 router.post("/enviar", postSyncEnviar);
 
 module.exports = router;
