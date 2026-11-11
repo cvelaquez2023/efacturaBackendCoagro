@@ -12,6 +12,7 @@ router.use(authMiddleware, checkRol(["Admin"]));
 
 router.use("/usuarioMovil", require("./usuarioMovil"));
 router.use("/visita", require("./visita"));
+router.use("/efectividadVisita", require("./efectividadVisita"));
 router.use("/reporteVisita", require("./reporteVisita"));
 router.use("/pedido", require("./pedido"));
 router.use("/globalesRuteo", require("./globalesRuteo"));
@@ -37,6 +38,14 @@ router.use("/rutaConsecutRt", require("./rutaConsecutRt"));
 router.use("/carga", require("./carga"));
 router.use("/configHh", require("./configHh"));
 router.use("/clienteUbicacion", require("./clienteUbicacion"));
+router.use("/lineaNegocio", require("./lineaNegocio"));
+router.use("/lider", require("./lider"));
+router.use("/proveedorMeta", require("./proveedorMeta"));
+router.use("/metaVentaProducto", require("./metaVentaProducto"));
+router.use("/condicionCliente", require("./condicionCliente"));
+router.use("/promocion", require("./promocion"));
+router.use("/precioVigente", require("./precioVigente"));
+router.use("/lineaArticulo", require("./lineaArticulo"));
 
 
 module.exports = router;

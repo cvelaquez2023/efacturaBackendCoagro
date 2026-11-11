@@ -897,12 +897,18 @@ const agruparPorDocumento = (filas) => {
 const SIN_MONTOS = { totalMercaderia: 0, descuentoVolumen: 0, subtotal: 0, iva: 0, granTotal: 0 };
 
 // Montos sobre una expresion de monto por linea (`monto`), limitados a las lineas que cumplan `donde`.
-const sqlMontos = (monto) => `
+// IVA truncado a 2 decimales (ROUND(..., 2, 1) trunca, no redondea) y granTotal = subtotal + ese IVA,
+// igual que el ERP; con * 1.13 directo salia a veces un centavo de mas.
+const sqlMontos = (monto) => {
+  const subtotal = `ISNULL(SUM(CASE WHEN D.EST_BON = 'V' THEN ${monto} END), 0)`;
+  const iva = `ROUND(${subtotal} * 0.13, 2, 1)`;
+  return `
   ISNULL(SUM(${monto}), 0) AS totalMercaderia,
   ISNULL(SUM(CASE WHEN D.EST_BON = 'B' THEN ${monto} END), 0) AS descuentoVolumen,
-  ISNULL(SUM(CASE WHEN D.EST_BON = 'V' THEN ${monto} END), 0) AS subtotal,
-  ISNULL(SUM(CASE WHEN D.EST_BON = 'V' THEN ${monto} END), 0) * 0.13 AS iva,
-  ISNULL(SUM(CASE WHEN D.EST_BON = 'V' THEN ${monto} END), 0) * 1.13 AS granTotal`;
+  ${subtotal} AS subtotal,
+  ${iva} AS iva,
+  ${subtotal} + ${iva} AS granTotal`;
+};
 
 //
 // GET /fr/sync/historialPedidos?cliente=04372   (header Authorization: Bearer <token movil>)
@@ -954,7 +960,7 @@ const sqlMontos = (monto) => `
 //    (cantidad = CANT_FAC del pedido).
 //  - montos: solo sobre las lineas pendientes (EST_LN = 'N'), con (MONT_LN - MONT_DESC):
 //      totalMercaderia = todas, descuentoVolumen = EST_BON 'B', subtotal = EST_BON 'V',
-//      iva = subtotal * 0.13, granTotal = subtotal * 1.13.
+//      iva = subtotal * 0.13 truncado a 2 decimales, granTotal = subtotal + iva.
 //    null si el pedido no tiene lineas pendientes (todo facturado).
 //  - Un mismo pedido repetido en dos rutas sale una sola vez (con la menor de mis rutas).
 //  - Orden: fecha descendente. FEC_PED como texto 'YYYY-MM-DD HH:MM:SS'. Textos sin espacios al final.
@@ -1130,8 +1136,8 @@ const getSyncHistorialPedidos = async (req, res) => {
 //    asi que total = MONT_LN (restarle MONT_DESC contaria el descuento dos veces).
 //    PRC_DESC = MONT_DESC / (PRE_UNI * CANT_FAC) * 100, redondeado a 2 (la tabla no lo trae; 0 si no aplica).
 //  - Montos, todos sobre MONT_LN: totalMercaderia = todas las lineas, descuentoVolumen = EST_BON 'B',
-//    subtotal = EST_BON 'V', iva = subtotal * 0.13, granTotal = subtotal * 1.13 (cuadra con MON_FAC
-//    salvo centavos de redondeo del ERP). Una factura sin lineas de ese tipo lleva 0.
+//    subtotal = EST_BON 'V', iva = subtotal * 0.13 truncado a 2 decimales (como el ERP),
+//    granTotal = subtotal + iva (cuadra con MON_FAC). Una factura sin lineas de ese tipo lleva 0.
 //  - Anuladas (ANULAR = 'S') SI vienen, con anulada: true, para que la app las marque.
 //  - AGENTE / NOMBRE_AGENTE: vendedor de la factura, codigo del ERP (VBV, VCZ...).
 //      AGENTE        = ESTADO_COMPROBANTE (la carga guarda ahi el vendedor de la factura del ERP); si viene
