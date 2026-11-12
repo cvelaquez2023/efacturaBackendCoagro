@@ -11,6 +11,7 @@ const ArticuloErp = require("./ArticuloErp");
  * PK IdMeta (identity). UNIQUE (Anio, Mes, Vendedor, Articulo).
  * FKs: IdLineaNegocio -> LineaNegocio.id, IdLider -> Lider.id,
  * IdProveedor -> ProveedorMeta.id, Vendedor -> VENDEDOR, Articulo -> ARTICULO.
+ * Carga masiva desde Excel: controllers/fr/metaVentaImportar.js.
  */
 const MetaVentaProducto = sequelize.define(
   "MetaVentaProducto",
@@ -67,6 +68,24 @@ const MetaVentaProducto = sequelize.define(
     Venta_Valor: {
       type: DataTypes.DECIMAL(18, 2),
       validate: { isDecimal: { msg: "Venta_Valor debe ser numerico" } },
+    },
+    // decimal(28,8) NOT NULL sin default en BD: el controller pone
+    // Incentivo = 0 y minimo = Meta_Unidades cuando no vienen.
+    Incentivo: {
+      type: DataTypes.DECIMAL(28, 8),
+      allowNull: false,
+      validate: {
+        isDecimal: { msg: "Incentivo debe ser numerico" },
+        min: { args: [0], msg: "Incentivo no puede ser negativo" },
+      },
+    },
+    minimo: {
+      type: DataTypes.DECIMAL(28, 8),
+      allowNull: false,
+      validate: {
+        isDecimal: { msg: "minimo debe ser numerico" },
+        min: { args: [0], msg: "minimo no puede ser negativo" },
+      },
     },
     FechaCreacion: { type: DataTypes.DATE },
     UsuarioCreacion: { type: DataTypes.STRING(50) },

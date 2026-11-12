@@ -53,6 +53,8 @@ const leerBody = (body) => {
     Meta_Unidades: body.metaUnidades,
     Venta_Unidades: body.ventaUnidades,
     Venta_Valor: body.ventaValor,
+    Incentivo: body.incentivo,
+    minimo: body.minimo,
   };
   Object.keys(campos).forEach((k) => vacio(campos[k]) && delete campos[k]);
   return campos;
@@ -109,7 +111,10 @@ const validarMeta = async (meta, cambios, idExcluir) => {
 const getMetasVentaProducto = async (req, res) => {
   try {
     const { page, limit, offset } = getPaginacion(req.query);
-    const { anio, mes, idLineaNegocio, idLider, idProveedor, vendedor, articulo } = req.query;
+    const {
+      anio, mes, idLineaNegocio, idLider, idProveedor, vendedor, articulo,
+      linea, lider, proveedor, // por codigo (como vienen en el Excel)
+    } = req.query;
 
     const where = {};
     if (!vacio(anio)) where.Anio = anio;
@@ -119,6 +124,9 @@ const getMetasVentaProducto = async (req, res) => {
     if (!vacio(idProveedor)) where.IdProveedor = idProveedor;
     if (!vacio(vendedor)) where.Vendedor = vendedor;
     if (!vacio(articulo)) where.Articulo = { [Op.like]: `%${articulo}%` };
+    if (!vacio(linea)) where["$lineaNegocio.codigo$"] = linea;
+    if (!vacio(lider)) where["$lider.codigo$"] = lider;
+    if (!vacio(proveedor)) where["$proveedor.codigo$"] = proveedor;
 
     const data = await metaVentaProductoModel.findAndCountAll({
       where,
@@ -188,7 +196,10 @@ const postMetaVentaProducto = async (req, res) => {
     }
 
     // FechaCreacion la pone la BD (default getdate()).
+    // Incentivo y minimo son NOT NULL sin default: 0 y la propia meta.
     const data = await metaVentaProductoModel.create({
+      Incentivo: 0,
+      minimo: campos.Meta_Unidades,
       ...campos,
       UsuarioCreacion: usuarioActual(req),
     });
@@ -246,7 +257,41 @@ const deleteMetaVentaProducto = async (req, res) => {
   }
 };
 
+// DELETE /fr/metaVentaProducto/periodo?anio=2026&mes=11&vendedor=VBM
+// Borra todas las metas de un periodo (para corregir y volver a subir el Excel).
+// anio y mes obligatorios; sin vendedor borra el mes completo de TODOS los
+// vendedores, por eso en ese caso exige ademas &todos=true.
+const deletePeriodoMetas = async (req, res) => {
+  try {
+    const { anio, mes, vendedor, todos } = req.query;
+    const a = Number(anio);
+    const m = Number(mes);
+    if (!Number.isInteger(a) || !Number.isInteger(m) || m < 1 || m > 12) {
+      return res.send({ result: {}, success: false, errors: ["anio y mes (1 a 12) son obligatorios"] });
+    }
+    if (vacio(vendedor) && String(todos).toLowerCase() !== "true") {
+      return res.send({
+        result: {},
+        success: false,
+        errors: ["Indique el vendedor, o envie todos=true para borrar el mes completo de todos los vendedores"],
+      });
+    }
+
+    const where = { Anio: a, Mes: m };
+    if (!vacio(vendedor)) where.Vendedor = vendedor;
+    const eliminadas = await metaVentaProductoModel.destroy({ where });
+    if (!eliminadas) {
+      return res.send({ result: { eliminadas: 0 }, success: false, errors: ["No hay metas para ese periodo"] });
+    }
+    res.send({ result: { eliminadas, anio: a, mes: m, vendedor: vendedor || "TODOS" }, success: true });
+  } catch (error) {
+    console.log(error);
+    res.send({ result: {}, success: false, errors: parseErrores(error, "Error al eliminar las metas del periodo") });
+  }
+};
+
 module.exports = {
+  deletePeriodoMetas,
   getMetasVentaProducto,
   getMetaVentaProducto,
   postMetaVentaProducto,

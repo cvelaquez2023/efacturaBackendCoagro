@@ -3,7 +3,8 @@ const { DataTypes } = require("sequelize");
 
 /**
  * Catalogo CINCOH.ProveedorMeta (metas de venta).
- * id int identity (PK), codigo varchar(8) NOT NULL UNIQUE,
+ * id int identity (PK), codigo varchar(20) NOT NULL UNIQUE (ampliado de 8 a 20
+ * en nov-2026 para los codigos libres que crea la carga de metas por Excel),
  * nombre varchar(100) NOT NULL, activo bit NOT NULL default 1,
  * FechaCreacion datetime default getdate(), UsuarioCreacion varchar(50).
  */
@@ -12,10 +13,10 @@ const ProveedorMeta = sequelize.define(
   {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     codigo: {
-      type: DataTypes.STRING(8),
+      type: DataTypes.STRING(20),
       allowNull: false,
       validate: {
-        len: { args: [1, 8], msg: "El codigo debe tener entre 1 y 8 caracteres" },
+        len: { args: [1, 20], msg: "El codigo debe tener entre 1 y 20 caracteres" },
       },
     },
     nombre: {

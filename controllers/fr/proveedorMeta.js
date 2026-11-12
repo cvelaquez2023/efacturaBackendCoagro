@@ -8,7 +8,7 @@ const parseErrores = (error, fallback) => {
     return error.errors.map((e) => e.message);
   }
   if (error.parent && error.parent.number === 8152) {
-    return ["Un valor supera el tamano permitido. codigo: max 8, nombre: max 100 caracteres."];
+    return ["Un valor supera el tamano permitido. codigo: max 20, nombre: max 100 caracteres."];
   }
   if (error.name === "SequelizeUniqueConstraintError") {
     return ["Ya existe un proveedor con ese codigo."];
