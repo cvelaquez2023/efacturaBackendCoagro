@@ -67,6 +67,10 @@ const models = {
   frPromocionModel: require("./fr/FrPromocion"),
   frPromocionProductoModel: require("./fr/FrPromocionProducto"),
   frPromocionDestinoModel: require("./fr/FrPromocionDestino"),
+  descuentoCliartModel: require("./fr/DescuentoCliart"),
+  descuentoNivelModel: require("./fr/DescuentoNivel"),
+  bonificacionCliartModel: require("./fr/BonificacionCliart"),
+  bonificacionNivelModel: require("./fr/BonificacionNivel"),
 };
 
 module.exports = models;

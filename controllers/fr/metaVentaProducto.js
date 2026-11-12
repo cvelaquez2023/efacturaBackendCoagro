@@ -1,4 +1,4 @@
-const { Op } = require("sequelize");
+const { Op, QueryTypes } = require("sequelize");
 const {
   metaVentaProductoModel,
   lineaNegocioModel,
@@ -290,7 +290,114 @@ const deletePeriodoMetas = async (req, res) => {
   }
 };
 
+// POST /fr/metaVentaProducto/actualizarVentas   body (o query): { anio?, mes? }
+// Boton de la web: ejecuta CINCOH.sp_ActualizarVentaMetaProducto, que llena Venta_Unidades y
+// Venta_Valor de las metas desde CINCOH.FACTURA / FACTURA_LINEA (facturas - devoluciones, no
+// anuladas). anio + mes = ese mes; solo anio = todo el anio; nada = todos los periodos con metas.
+// El SP pone UsuarioModificacion = usuario SQL (SUSER_SNAME), no el email de la web.
+const actualizarVentasMetas = async (req, res) => {
+  try {
+    const datos = { ...req.query, ...(req.body || {}) };
+    const anio = vacio(datos.anio) ? null : Number(datos.anio);
+    const mes = vacio(datos.mes) ? null : Number(datos.mes);
+    if (anio !== null && (!Number.isInteger(anio) || anio < 2000 || anio > 2100)) {
+      return res.send({ result: {}, success: false, errors: ["anio debe ser un numero entre 2000 y 2100"] });
+    }
+    if (mes !== null && (!Number.isInteger(mes) || mes < 1 || mes > 12)) {
+      return res.send({ result: {}, success: false, errors: ["mes debe ser un numero entre 1 y 12"] });
+    }
+    if (mes !== null && anio === null) {
+      return res.send({ result: {}, success: false, errors: ["Si indica el mes debe indicar tambien el anio"] });
+    }
+
+    const inicio = Date.now();
+    const [fila] = await metaVentaProductoModel.sequelize.query(
+      "EXEC CINCOH.sp_ActualizarVentaMetaProducto @Anio = :anio, @Mes = :mes",
+      { replacements: { anio, mes }, type: QueryTypes.SELECT }
+    );
+    const actualizadas = Number((fila && fila.metas_actualizadas) || 0);
+
+    res.send({
+      result: {
+        metasActualizadas: actualizadas,
+        anio,
+        mes,
+        alcance: mes ? "mes" : anio ? "anio" : "todos",
+        segundos: Math.round((Date.now() - inicio) / 100) / 10,
+      },
+      success: true,
+      mensaje: actualizadas
+        ? `Se actualizaron las ventas de ${actualizadas} metas.`
+        : "No hay metas en el periodo indicado.",
+    });
+  } catch (error) {
+    console.log(error);
+    // RAISERROR / THROW del SP llegan en error.parent.message.
+    const detalle = error.parent && error.parent.message;
+    res.send({
+      result: {},
+      success: false,
+      errors: [detalle ? `Error al actualizar las ventas de las metas: ${detalle}` : "Error al actualizar las ventas de las metas"],
+    });
+  }
+};
+
+// GET /fr/metaVentaProducto/ventasDiarias?anio=2026&mes=11[&vendedor=VBM][&articulo=16006]
+// Solo lectura: ventas del ERP por vendedor, articulo y dia del mes, desde CINCOH.FACTURA +
+// FACTURA_LINEA. Mismo criterio que sp_ActualizarVentaMetaProducto (sin anuladas, devoluciones
+// 'D' restando, valor = PRECIO_TOTAL - DESC_TOT_GENERAL), asi la suma del mes cuadra con
+// Venta_Unidades / Venta_Valor de la meta. SEMANA = semana del mes por dias: 1-7 = 1, 8-14 = 2,
+// 15-21 = 3, 22-28 = 4, 29-31 = 5. Solo vienen los dias con movimiento.
+const ventasDiarias = async (req, res) => {
+  try {
+    const anio = Number(req.query.anio);
+    const mes = Number(req.query.mes);
+    if (!Number.isInteger(anio) || anio < 2000 || anio > 2100 || !Number.isInteger(mes) || mes < 1 || mes > 12) {
+      return res.send({ result: {}, success: false, errors: ["anio (2000 a 2100) y mes (1 a 12) son obligatorios"] });
+    }
+    const vendedor = vacio(req.query.vendedor) ? null : String(req.query.vendedor).trim();
+    const articulo = vacio(req.query.articulo) ? null : String(req.query.articulo).trim();
+
+    const desde = `${anio}-${String(mes).padStart(2, "0")}-01`;
+    const hasta = mes === 12 ? `${anio + 1}-01-01` : `${anio}-${String(mes + 1).padStart(2, "0")}-01`;
+
+    const ventas = await metaVentaProductoModel.sequelize.query(
+      `SELECT V.VENDEDOR, VE.NOMBRE AS NOMBRE_VENDEDOR, V.ARTICULO, A.DESCRIPCION AS DESCRIPCION_ARTICULO,
+              V.DIA, (V.DIA - 1) / 7 + 1 AS SEMANA,
+              CONVERT(varchar(10), DATEFROMPARTS(:anio, :mes, V.DIA), 23) AS FECHA,
+              CAST(V.UNIDADES AS float) AS UNIDADES, CAST(V.VALOR AS float) AS VALOR
+         FROM (SELECT LTRIM(RTRIM(f.VENDEDOR)) AS VENDEDOR, LTRIM(RTRIM(fl.ARTICULO)) AS ARTICULO,
+                      DAY(f.FECHA) AS DIA,
+                      SUM(CASE WHEN f.TIPO_DOCUMENTO = 'D' THEN -1 ELSE 1 END * fl.CANTIDAD) AS UNIDADES,
+                      SUM(CASE WHEN f.TIPO_DOCUMENTO = 'D' THEN -1 ELSE 1 END
+                          * (fl.PRECIO_TOTAL - ISNULL(fl.DESC_TOT_GENERAL, 0))) AS VALOR
+                 FROM COAGRO2.CINCOH.FACTURA f
+                 JOIN COAGRO2.CINCOH.FACTURA_LINEA fl
+                   ON fl.TIPO_DOCUMENTO = f.TIPO_DOCUMENTO AND fl.FACTURA = f.FACTURA
+                WHERE f.ANULADA = 'N' AND f.TIPO_DOCUMENTO IN ('F', 'D')
+                  AND f.FECHA >= :desde AND f.FECHA < :hasta
+                  ${vendedor ? "AND f.VENDEDOR = :vendedor" : ""}
+                  ${articulo ? "AND fl.ARTICULO = :articulo" : ""}
+                GROUP BY f.VENDEDOR, fl.ARTICULO, DAY(f.FECHA)) V
+         LEFT JOIN COAGRO2.CINCOH.VENDEDOR VE ON VE.VENDEDOR = V.VENDEDOR
+         LEFT JOIN COAGRO2.CINCOH.ARTICULO A ON A.ARTICULO = V.ARTICULO
+        ORDER BY V.VENDEDOR, V.ARTICULO, V.DIA`,
+      { replacements: { anio, mes, desde, hasta, vendedor, articulo }, type: QueryTypes.SELECT }
+    );
+
+    res.send({
+      result: { anio, mes, vendedor, articulo, ventas },
+      success: true,
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({ result: {}, success: false, errors: ["Error al consultar las ventas diarias del ERP"] });
+  }
+};
+
 module.exports = {
+  ventasDiarias,
+  actualizarVentasMetas,
   deletePeriodoMetas,
   getMetasVentaProducto,
   getMetaVentaProducto,

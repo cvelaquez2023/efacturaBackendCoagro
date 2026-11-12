@@ -2,7 +2,7 @@
 // (header Authorization: Bearer <token>) y rol RUTA. Las rutas salen de la
 // handheld del token (RUTA_ASIGNADA_RT), no de la URL.
 // Queda como GET /fr/sync/clientes, /clientesCia, /articulos, /lotes, /precios, /cobros, /cobrosAgente, /consecutivos, /configuracion, /cotizaciones, /historialPedidos, /historialFacturas,
-// /historialPedidosRuta, /historialFacturasRuta, /cuentasBanco y /recibosPendientes,
+// /historialPedidosRuta, /historialFacturasRuta, /cuentasBanco, /recibosPendientes y /metas,
 // y POST /fr/sync/enviar (la handheld sube lo registrado sin conexion, incluidos depositos).
 
 const { Router } = require("express");
@@ -26,6 +26,7 @@ const {
   getSyncLotes,
   getSyncCuentasBanco,
   getSyncRecibosPendientes,
+  getSyncMetas,
 } = require("../../controllers/fr/sync");
 const { postSyncEnviar } = require("../../controllers/fr/syncEnviar");
 
@@ -52,6 +53,7 @@ router.get("/historialPedidosRuta", getSyncHistorialPedidosRuta);
 router.get("/historialFacturasRuta", getSyncHistorialFacturasRuta);
 router.get("/cuentasBanco", getSyncCuentasBanco);
 router.get("/recibosPendientes", getSyncRecibosPendientes);
+router.get("/metas", getSyncMetas);
 router.post("/enviar", postSyncEnviar);
 
 module.exports = router;

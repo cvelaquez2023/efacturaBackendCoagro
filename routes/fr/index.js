@@ -47,6 +47,10 @@ router.use("/condicionCliente", require("./condicionCliente"));
 router.use("/promocion", require("./promocion"));
 router.use("/precioVigente", require("./precioVigente"));
 router.use("/lineaArticulo", require("./lineaArticulo"));
+router.use("/descuentoCliart", require("./descuentoCliart"));
+router.use("/descuentoNivel", require("./descuentoNivel"));
+router.use("/bonificacionCliart", require("./bonificacionCliart"));
+router.use("/bonificacionNivel", require("./bonificacionNivel"));
 
 
 module.exports = router;

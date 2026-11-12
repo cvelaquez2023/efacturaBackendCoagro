@@ -1471,7 +1471,119 @@ const getSyncRecibosPendientes = async (req, res) => {
   }
 };
 
+//
+// GET /fr/sync/metas[?anio=2026&mes=11]   (header Authorization: Bearer <token movil>)
+// Metas de venta por articulo SOLO del agente de la handheld del token: RUTA_ASIGNADA_RT.AGENTE
+// (codigo de ruteo) se traduce con AGENTE_ASOC_RT.CODIGO -> AGENTE, que es
+// MetaVentaProducto.Vendedor. El agente no viaja en la URL, asi un
+// vendedor nunca puede pedir las metas de otro.
+//
+// Tabla: CINCOH.MetaVentaProducto (+ LineaNegocio, Lider, ProveedorMeta, ARTICULO para nombres).
+// Excepcion a "la movil solo lee erpadmin": las metas se cargan por Excel directo en CINCOH y no
+// tienen copia en erpadmin.
+//
+// Sin anio/mes manda el periodo actual (fecha del servidor). Con solo anio, todo ese anio.
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     agentes:    ["AG01"],   (codigos de ruteo)
+//     vendedores: ["VBV"],    (vendedores del ERP)
+//     periodo: { anio: 2026, mes: 11 },
+//     metas:   [{ ID_META, ANIO, MES, VENDEDOR, COD_LINEA, LINEA, COD_LIDER, LIDER, COD_ART,
+//                 DES_ART, COD_PROVEEDOR, PROVEEDOR, META_UNIDADES, MINIMO, INCENTIVO,
+//                 VENTA_UNIDADES, VENTA_VALOR, FECHA_MODIFICACION }]          -> META_VENTA
+//   }
+// }
+//
+// La app debe borrar las metas del periodo recibido y volver a insertar: la carga por Excel
+// REEMPLAZA el periodo completo y los IdMeta cambian en cada re-subida.
+
+const entero = (valor) => (/^\d+$/.test(String(valor ?? "").trim()) ? Number(valor) : null);
+
+const getSyncMetas = async (req, res) => {
+  try {
+    const agentes = [
+      ...new Set(req.mobile.rutas.map((r) => String(r.AGENTE ?? "").trim()).filter(Boolean)),
+    ];
+    if (!agentes.length) {
+      return res.send({
+        result: {},
+        success: false,
+        errors: [`La handheld ${req.mobile.handheld.HANDHELD} no tiene un agente asignado`],
+      });
+    }
+
+    const hoy = new Date();
+    const tieneAnio = req.query.anio !== undefined && req.query.anio !== "";
+    const tieneMes = req.query.mes !== undefined && req.query.mes !== "";
+    const anio = tieneAnio ? entero(req.query.anio) : hoy.getFullYear();
+    const mes = tieneMes ? entero(req.query.mes) : tieneAnio ? null : hoy.getMonth() + 1;
+    if (anio === null || anio < 2000 || anio > 2100) {
+      return res.send({ result: {}, success: false, errors: ["anio debe ser un numero entre 2000 y 2100"] });
+    }
+    if (tieneMes && (mes === null || mes < 1 || mes > 12)) {
+      return res.send({ result: {}, success: false, errors: ["mes debe ser un numero entre 1 y 12"] });
+    }
+
+    // RUTA_ASIGNADA_RT.AGENTE es el CODIGO de ruteo (AGENTE_ASOC_RT.CODIGO), que puede ser un
+    // alias distinto al vendedor del ERP (ej. AG01 -> VBV). La meta se guarda con el del ERP.
+    const asociados = await sequelize.query(
+      `SELECT DISTINCT LTRIM(RTRIM(AGENTE)) AS AGENTE
+         FROM COAGRO2.erpadmin.AGENTE_ASOC_RT
+        WHERE CODIGO IN (:agentes)`,
+      { replacements: { agentes }, type: QueryTypes.SELECT }
+    );
+    const vendedores = asociados.map((a) => a.AGENTE).filter(Boolean);
+    if (!vendedores.length) {
+      return res.send({
+        result: {},
+        success: false,
+        errors: [`El agente ${agentes.join(", ")} no esta asociado a un vendedor del ERP (AGENTE_ASOC_RT)`],
+      });
+    }
+
+    const metas = await sequelize.query(
+      `SELECT M.IdMeta AS ID_META, M.Anio AS ANIO, M.Mes AS MES,
+              LTRIM(RTRIM(M.Vendedor)) AS VENDEDOR,
+              LTRIM(RTRIM(L.codigo)) AS COD_LINEA, L.nombre AS LINEA,
+              LTRIM(RTRIM(LI.codigo)) AS COD_LIDER, LI.nombre AS LIDER,
+              LTRIM(RTRIM(M.Articulo)) AS COD_ART, A.DESCRIPCION AS DES_ART,
+              LTRIM(RTRIM(P.codigo)) AS COD_PROVEEDOR, P.nombre AS PROVEEDOR,
+              M.Meta_Unidades AS META_UNIDADES, CAST(M.minimo AS decimal(18, 2)) AS MINIMO,
+              CAST(M.Incentivo AS float) AS INCENTIVO,
+              M.Venta_Unidades AS VENTA_UNIDADES, M.Venta_Valor AS VENTA_VALOR,
+              CONVERT(varchar(19), COALESCE(M.FechaModificacion, M.FechaCreacion), 120) AS FECHA_MODIFICACION
+         FROM COAGRO2.CINCOH.MetaVentaProducto M
+         LEFT JOIN COAGRO2.CINCOH.LineaNegocio L ON L.id = M.IdLineaNegocio
+         LEFT JOIN COAGRO2.CINCOH.Lider LI ON LI.id = M.IdLider
+         LEFT JOIN COAGRO2.CINCOH.ProveedorMeta P ON P.id = M.IdProveedor
+         LEFT JOIN COAGRO2.CINCOH.ARTICULO A ON A.ARTICULO = M.Articulo
+        WHERE M.Vendedor IN (:vendedores) AND M.Anio = :anio
+          ${mes ? "AND M.Mes = :mes" : ""}
+        ORDER BY M.Anio, M.Mes, M.Vendedor, L.codigo, M.Articulo`,
+      { replacements: { vendedores, anio, mes }, type: QueryTypes.SELECT }
+    );
+
+    res.send({
+      result: { agentes, vendedores, periodo: { anio, mes }, metas },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de metas"],
+    });
+  }
+};
+
 module.exports = {
+  getSyncMetas,
   getSyncRecibosPendientes,
   getSyncCuentasBanco,
   getSyncLotes,

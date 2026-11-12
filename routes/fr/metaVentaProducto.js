@@ -7,6 +7,8 @@ const {
   putMetaVentaProducto,
   deleteMetaVentaProducto,
   deletePeriodoMetas,
+  actualizarVentasMetas,
+  ventasDiarias,
 } = require("../../controllers/fr/metaVentaProducto");
 const { importarMetasVenta, consultaMetasVenta } = require("../../controllers/fr/metaVentaImportar");
 
@@ -24,6 +26,10 @@ router.get("/consulta", authMiddleware, roles, consultaMetasVenta);
 router.post("/importar", authMiddleware, roles, subirExcel("archivo"), importarMetasVenta);
 // Borrado de un periodo completo: ?anio=&mes=&vendedor= (o &todos=true).
 router.delete("/periodo", authMiddleware, roles, deletePeriodoMetas);
+// Boton "Actualizar ventas": ejecuta CINCOH.sp_ActualizarVentaMetaProducto. Body/query: anio?, mes?
+router.post("/actualizarVentas", authMiddleware, roles, actualizarVentasMetas);
+// Solo lectura: ventas del ERP por vendedor/articulo/dia. ?anio&mes obligatorios, &vendedor &articulo opcionales.
+router.get("/ventasDiarias", authMiddleware, roles, ventasDiarias);
 
 router.get("/", authMiddleware, roles, getMetasVentaProducto);
 router.get("/:id", authMiddleware, roles, getMetaVentaProducto);
