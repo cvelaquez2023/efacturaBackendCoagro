@@ -1330,7 +1330,150 @@ const getSyncHistorialFacturasRuta = async (req, res) => {
   }
 };
 
+//
+// GET /fr/sync/cuentasBanco   (header Authorization: Bearer <token movil>)
+// Cuentas bancarias donde el vendedor puede depositar lo cobrado. La app las usa para
+// armar el encabezado de POST /fr/sync/enviar -> depositos (COD_CIA, COD_BCO, CTA_BCO).
+// No dependen de la ruta: se mandan todas.
+//
+// Tabla: erpadmin.alCXC_CTA_BCO (PK COD_CIA + COD_BCO + CTA_BCO)
+//
+// Respuesta: { result: { cuentas: [{ COD_CIA, COD_BCO, CTA_BCO, NOM_CTA, MONEDA }] } }
+//
+const getSyncCuentasBanco = async (req, res) => {
+  try {
+    const cuentas = await sequelize.query(
+      `SELECT LTRIM(RTRIM(COD_CIA)) AS COD_CIA, LTRIM(RTRIM(COD_BCO)) AS COD_BCO,
+              LTRIM(RTRIM(CTA_BCO)) AS CTA_BCO, LTRIM(RTRIM(NOM_CTA)) AS NOM_CTA,
+              LTRIM(RTRIM(MONEDA)) AS MONEDA
+         FROM COAGRO2.erpadmin.alCXC_CTA_BCO
+        ORDER BY COD_CIA, COD_BCO, CTA_BCO`,
+      { type: QueryTypes.SELECT }
+    );
+
+    res.send({
+      result: { cuentas },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de cuentas bancarias"],
+    });
+  }
+};
+
+//
+// GET /fr/sync/recibosPendientes   (header Authorization: Bearer <token movil>)
+// Recibos (cobros) que la handheld envio con POST /fr/sync/enviar -> depositos y que control aun
+// no aplica en el ERP. La app los usa para mostrarlos, reimprimirlos y descontarlos del saldo del
+// documento mientras siguen pendientes.
+//
+// Tablas:
+//   - erpadmin.alCXC_ENC_DEP      -> encabezado del recibo (NUM_DEP = numero de recibo)
+//   - erpadmin.alCXC_DET_DEP      -> lineas, una por documento (se une por NUM_DEP + CTA_BCO, como el envio)
+//   - erpadmin.alCXC_CTA_BCO      -> NOM_CTA (COD_CIA + COD_BCO + CTA_BCO)
+//   - erpadmin.alCXC_PEN_COB      -> COD_CLT, COD_ZON, COD_TIP_DC, CLASE_DOCUMENTO del documento (NUM_DOC)
+//   - erpadmin.alFAC_ENC_HIST_FAC -> respaldo de COD_CLT y COD_ZON si el documento ya no esta en PEN_COB
+//   - erpadmin.cliente            -> NOM_CLT
+//
+// Filtro: ISNULL(DOC_PRO, 'N') = 'N' (pendiente; los 'S' ya los aplico control y no se envian) y
+// HandHeld = la handheld del token. No se filtra por ruta: el recibo es de la handheld.
+//
+// Cliente y ruta: ENC/DET no los guardan; salen de NUM_DOC. Primero alCXC_PEN_COB y, si el documento
+// ya se cancelo, alFAC_ENC_HIST_FAC (la misma tabla de /historialFacturasRuta), que no tiene
+// COD_TIP_DC ni CLASE_DOCUMENTO (van null). OUTER APPLY TOP 1 (primero la misma compania y una ruta
+// de la handheld) para no duplicar lineas. Si no se encuentra, esos campos van null y la linea se envia.
+//
+// Respuesta:
+// { result: { recibos: [{ NUM_DEP, COD_CIA, COD_BCO, CTA_BCO, NOM_CTA, MON_DEP, FEC_DEP, IND_MON,
+//                         NOTAS, DOC_PRO, CONSEC_DEP,
+//                         lineas: [{ NUM_DOC, COD_TIP_DC, CLASE_DOCUMENTO, COD_CLT, NOM_CLT, COD_ZON,
+//                                    MON_EFE, MON_CHE, MON_DEP, MON_TRA, REF }] }] } }
+// FEC_DEP como texto 'YYYY-MM-DD HH:MM:SS'; montos como numero (null -> 0); textos sin espacios.
+// Orden: FEC_DEP y NUM_DEP; lineas por NUM_DOC.
+//
+const getSyncRecibosPendientes = async (req, res) => {
+  try {
+    const handheld = String((req.mobile.handheld && req.mobile.handheld.HANDHELD) || "").trim();
+    const replacements = { handheld, rutas: req.mobile.codigosRuta.length ? req.mobile.codigosRuta : [""] };
+    const pendientes = `ISNULL(E.DOC_PRO, 'N') = 'N' AND E.HandHeld = :handheld`;
+
+    const [encabezados, lineas] = await Promise.all([
+      sequelize.query(
+        `SELECT LTRIM(RTRIM(E.NUM_DEP)) AS NUM_DEP, LTRIM(RTRIM(E.COD_CIA)) AS COD_CIA,
+                LTRIM(RTRIM(E.COD_BCO)) AS COD_BCO, LTRIM(RTRIM(E.CTA_BCO)) AS CTA_BCO,
+                LTRIM(RTRIM(C.NOM_CTA)) AS NOM_CTA, ISNULL(E.MON_DEP, 0) AS MON_DEP,
+                CONVERT(varchar(19), E.FEC_DEP, 120) AS FEC_DEP, LTRIM(RTRIM(E.IND_MON)) AS IND_MON,
+                LTRIM(RTRIM(E.NOTAS)) AS NOTAS, ISNULL(LTRIM(RTRIM(E.DOC_PRO)), 'N') AS DOC_PRO, E.CONSEC_DEP
+           FROM COAGRO2.erpadmin.alCXC_ENC_DEP E
+           LEFT JOIN COAGRO2.erpadmin.alCXC_CTA_BCO C
+             ON C.COD_CIA = E.COD_CIA AND C.COD_BCO = E.COD_BCO AND C.CTA_BCO = E.CTA_BCO
+          WHERE ${pendientes}
+          ORDER BY E.FEC_DEP, E.NUM_DEP`,
+        { replacements, type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT LTRIM(RTRIM(D.NUM_DEP)) AS _DEP, LTRIM(RTRIM(D.CTA_BCO)) AS _CTA,
+                LTRIM(RTRIM(D.NUM_DOC)) AS NUM_DOC,
+                LTRIM(RTRIM(P.COD_TIP_DC)) AS COD_TIP_DC, LTRIM(RTRIM(P.CLASE_DOCUMENTO)) AS CLASE_DOCUMENTO,
+                LTRIM(RTRIM(COALESCE(P.COD_CLT, F.COD_CLT))) AS COD_CLT, LTRIM(RTRIM(CL.NOM_CLT)) AS NOM_CLT,
+                LTRIM(RTRIM(COALESCE(P.COD_ZON, F.COD_ZON))) AS COD_ZON,
+                ISNULL(D.MON_EFE, 0) AS MON_EFE, ISNULL(D.MON_CHE, 0) AS MON_CHE,
+                ISNULL(D.MON_DEP, 0) AS MON_DEP, ISNULL(D.MON_TRA, 0) AS MON_TRA,
+                LTRIM(RTRIM(D.REF)) AS REF
+           FROM COAGRO2.erpadmin.alCXC_DET_DEP D
+           JOIN COAGRO2.erpadmin.alCXC_ENC_DEP E ON E.NUM_DEP = D.NUM_DEP AND E.CTA_BCO = D.CTA_BCO
+           OUTER APPLY (SELECT TOP 1 PC.COD_CLT, PC.COD_ZON, PC.COD_TIP_DC, PC.CLASE_DOCUMENTO
+                          FROM COAGRO2.erpadmin.alCXC_PEN_COB PC
+                         WHERE PC.NUM_DOC = D.NUM_DOC
+                         ORDER BY CASE WHEN PC.COD_CIA = E.COD_CIA THEN 0 ELSE 1 END,
+                                  CASE WHEN PC.COD_ZON IN (:rutas) THEN 0 ELSE 1 END, PC.COD_ZON) P
+           -- Respaldo solo si ya no esta en PEN_COB (documento cancelado).
+           OUTER APPLY (SELECT TOP 1 HF.COD_CLT, HF.COD_ZON
+                          FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC HF
+                         WHERE P.COD_CLT IS NULL AND HF.NUM_FAC = D.NUM_DOC
+                         ORDER BY CASE WHEN HF.COD_CIA = E.COD_CIA THEN 0 ELSE 1 END,
+                                  CASE WHEN HF.COD_ZON IN (:rutas) THEN 0 ELSE 1 END, HF.COD_ZON) F
+           LEFT JOIN COAGRO2.erpadmin.cliente CL ON CL.COD_CLT = COALESCE(P.COD_CLT, F.COD_CLT)
+          WHERE ${pendientes}
+          ORDER BY D.NUM_DEP, D.NUM_DOC`,
+        { replacements, type: QueryTypes.SELECT }
+      ),
+    ]);
+
+    const lineasPorRecibo = new Map();
+    for (const { _DEP, _CTA, ...l } of lineas) {
+      const k = `${_DEP}|${_CTA}`;
+      if (!lineasPorRecibo.has(k)) lineasPorRecibo.set(k, []);
+      lineasPorRecibo.get(k).push(l);
+    }
+    const recibos = encabezados.map((e) => ({
+      ...e,
+      lineas: lineasPorRecibo.get(`${e.NUM_DEP}|${e.CTA_BCO}`) || [],
+    }));
+
+    res.send({
+      result: { recibos },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de recibos"],
+    });
+  }
+};
+
 module.exports = {
+  getSyncRecibosPendientes,
+  getSyncCuentasBanco,
   getSyncLotes,
   getSyncHistorialPedidos,
   getSyncHistorialFacturas,

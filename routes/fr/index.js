@@ -38,6 +38,7 @@ router.use("/rutaConsecutRt", require("./rutaConsecutRt"));
 router.use("/carga", require("./carga"));
 router.use("/configHh", require("./configHh"));
 router.use("/clienteUbicacion", require("./clienteUbicacion"));
+router.use("/deposito", require("./deposito"));
 router.use("/lineaNegocio", require("./lineaNegocio"));
 router.use("/lider", require("./lider"));
 router.use("/proveedorMeta", require("./proveedorMeta"));

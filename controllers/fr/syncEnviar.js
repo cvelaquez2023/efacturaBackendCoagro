@@ -9,6 +9,8 @@
 //   - alFAC_ENC_PED      <- pedidos[].encabezado (llave COD_CIA + COD_ZON + NUM_PED)
 //   - alFAC_DET_PED      <- pedidos[].lineas     (se unen al encabezado por COD_CIA + NUM_PED)
 //   - alFAC_ENC_PED/DET  <- aprobaciones  (cotizacion ya enviada: TIP_DOC 'C' -> 'F')
+//   - alCXC_ENC_DEP      <- depositos[].encabezado (llave COD_CIA + COD_BCO + CTA_BCO + NUM_DEP)
+//   - alCXC_DET_DEP      <- depositos[].lineas     (se unen al encabezado por NUM_DEP + CTA_BCO)
 //   - RUTA_CONSECUT_RT   <- consecutivos  (PEDIDO y/o FACTURA de la ruta, solo si avanzan)
 //
 // Request (cualquier arreglo puede venir vacio u omitirse):
@@ -18,7 +20,10 @@
 //                   ubicacion: { LATITUD, LONGITUD, ALTITUD, TIEMPO_GPS, TIEMPO_PDA } | null }],
 //   pedidos:     [{ encabezado: { COD_CIA, COD_ZON, COD_CLT, NUM_PED, ... }, lineas: [{ NUM_LN, COD_ART, ... }] }],
 //   aprobaciones: [{ COD_CIA, COD_ZON, NUM_PED, FEC_PED, FEC_DES? }],   // cotizaciones que el vendedor aprobo
-//   consecutivos: [{ RUTA, PEDIDO?, FACTURA? }]   // siguiente pedido / cotizacion de la ruta, ya incrementado por la app
+//   depositos:   [{ encabezado: { COD_CIA, COD_BCO, CTA_BCO, NUM_DEP, MON_DEP, FEC_DEP, IND_MON, NOTAS?, DOC_PRO? },
+//                   lineas: [{ NUM_DOC, MON_CHE?, MON_EFE?, MON_DEP?, MON_TRA?, REF? }] }],
+//                   (una linea por documento; REF = texto plano de los cheques)
+//   consecutivos: [{ RUTA, PEDIDO?, FACTURA?, RECIBO? }]   // siguiente pedido / cotizacion / recibo de la ruta, ya incrementado por la app
 // }
 // Fechas como texto 'YYYY-MM-DD HH:MM:SS' en hora local; se guardan tal cual (sin zona horaria).
 //
@@ -30,13 +35,14 @@
 //     visitas:      [{ CLIENTE, RUTA, INICIO, ok, duplicado?, error? }],
 //     pedidos:      [{ COD_ZON, NUM_PED, ok, duplicado?, conflicto?, error? }],
 //     aprobaciones: [{ COD_ZON, NUM_PED, ok, duplicado?, error? }],   // siempre viene (aunque sea [])
+//     depositos:    [{ CTA_BCO, NUM_DEP, ok, CONSEC_DEP?, duplicado?, conflicto?, error? }],
 //     consecutivos: [{ RUTA, PEDIDO, FACTURA?, ok, ignorado?, actual?, ignoradoFactura?, actualFactura?, error? }]
 //   }
 // }
 // success: false solo si el request entero es invalido (formato); el token lo valida mobileSession (401).
 //
 // Notas:
-//  - Se procesa en orden: ubicaciones, visitas, pedidos, aprobaciones, consecutivos. Cada registro es
+//  - Se procesa en orden: ubicaciones, visitas, pedidos, aprobaciones, depositos, consecutivos. Cada registro es
 //    independiente: uno con error no impide guardar los demas.
 //  - No duplica: una visita que ya existe responde ok con duplicado: true y NO se sobrescribe (el
 //    celular puede reenviar lo mismo si se corto la respuesta).
@@ -62,6 +68,16 @@
 //    ok: false. Si el actual esta vacio o no termina en numero, se guarda tal cual. Asi
 //    GET /fr/sync/consecutivos lo devuelve en la siguiente carga. FACTURA (consecutivo de cotizaciones)
 //    sigue la misma regla contra RUTA_CONSECUT_RT.FACTURA; su resultado va en ignoradoFactura/actualFactura.
+//    RECIBO (recibos de cobro; es el NUM_DEP de los depositos) igual, en ignoradoRecibo/actualRecibo.
+//  - Deposito: cada deposito es un RECIBO de cobro de la app; NUM_DEP es el numero del recibo
+//    (RUTA_CONSECUT_RT.RECIBO de la ruta, texto: RERT_<ruta>_<correlativo>, p. ej. RERT_01_00001).
+//    La boleta / transferencia van en REF.
+//    CONSEC_DEP es IDENTITY: lo pone SQL Server y se devuelve en la respuesta. HandHeld sale del
+//    token, no del body. NUM_DEP y CTA_BCO de las lineas salen del encabezado. Encabezado + lineas
+//    van en una transaccion. Si ya existe COD_CIA + COD_BCO + CTA_BCO + NUM_DEP es un reenvio (ok,
+//    duplicado: true, no se sobrescribe). Si CTA_BCO + NUM_DEP existe con otra compania o banco es
+//    conflicto (alCXC_DET_DEP solo distingue por NUM_DEP + CTA_BCO). IND_MON: 'L' local, 'D' dolar.
+//    COD_CIA + COD_BCO + CTA_BCO debe existir en alCXC_CTA_BCO (la app las baja de GET /fr/sync/cuentasBanco).
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
@@ -85,6 +101,28 @@ const COLUMNAS_DET = [
   "MON_PRC_MN", "POR_DSC_AP", "ART_BON", "PORC_IMPUESTO1", "PORC_IMPUESTO2", "PORCENTAJE_IMP1",
   "PORCENTAJE_IMP2", "PORC_EXONERACION", "MONTO_EXONERACION", "ES_CANASTA_BASICA", "ES_OTRO_CARGO",
 ];
+
+// Encabezado y lineas de alCXC_ENC_DEP / alCXC_DET_DEP que se aceptan de la app.
+const COLUMNAS_ENC_DEP = ["MON_DEP", "FEC_DEP", "IND_MON", "NOTAS", "DOC_PRO"];
+// MON_DEP (deposito del cliente) y MON_TRA (transferencia) son columnas nuevas de alCXC_DET_DEP:
+// deben existir en SQL Server antes de publicar este cambio.
+const COLUMNAS_DET_DEP = ["MON_CHE", "MON_EFE", "MON_DEP", "MON_TRA", "REF"];
+const MONTOS_DET_DEP = ["MON_CHE", "MON_EFE", "MON_DEP", "MON_TRA"];
+const MONEDAS_DEP = ["L", "D"];
+// Largos de las columnas de texto (INFORMATION_SCHEMA de erpadmin.alCXC_ENC_DEP / alCXC_DET_DEP).
+const LARGOS_ENC_DEP = { COD_CIA: 10, COD_BCO: 10, CTA_BCO: 20, NUM_DEP: 30, NOTAS: 80, HandHeld: 30 };
+// NUM_DOC se amplio de 20 a 50: los documentos son numeros de DTE (DTE-03-M001P001-26-000000000009776 = 34).
+const LARGOS_DET_DEP = { NUM_DOC: 50, REF: 80 };
+// Mensaje si algun valor no cabe en su columna; null si todo cabe.
+const excedeLargo = (largos, valores) => {
+  for (const [columna, max] of Object.entries(largos)) {
+    const v = texto(valores[columna]);
+    if (v.length > max) return `${columna} "${v}" tiene ${v.length} caracteres y la columna permite ${max}`;
+  }
+  return null;
+};
+// NUM_DEP = numero de recibo de la app: letras, digitos, '_' o '-' y termina en el correlativo (max 30).
+const FORMATO_NUM_DEP = /^[A-Za-z0-9_-]{0,29}\d$/;
 
 const texto = (v) => (v === undefined || v === null ? "" : String(v).trim());
 
@@ -357,6 +395,102 @@ const procesarAprobacion = async (contexto, a) => {
   }
 };
 
+const esMonto = (v) => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
+
+const procesarDeposito = async (contexto, d) => {
+  const enc = (d && d.encabezado) || {};
+  const lineas = Array.isArray(d && d.lineas) ? d.lineas : [];
+  const COD_CIA = texto(enc.COD_CIA);
+  const COD_BCO = texto(enc.COD_BCO);
+  const CTA_BCO = texto(enc.CTA_BCO);
+  const NUM_DEP = texto(enc.NUM_DEP);
+  const salida = { CTA_BCO, NUM_DEP };
+
+  for (const [c, v] of Object.entries({ COD_CIA, COD_BCO, CTA_BCO, NUM_DEP })) {
+    if (!v) return { ...salida, ok: false, error: `El campo ${c} es obligatorio` };
+  }
+  if (!contexto.cuentasBanco.has(`${COD_CIA}|${COD_BCO}|${CTA_BCO}`)) {
+    return { ...salida, ok: false, error: `La cuenta ${CTA_BCO} del banco ${COD_BCO} (compania ${COD_CIA}) no existe` };
+  }
+  if (!FORMATO_NUM_DEP.test(NUM_DEP)) {
+    return { ...salida, ok: false, error: "NUM_DEP debe ser el numero de recibo (p. ej. RERT_01_00001)" };
+  }
+  if (!esMonto(enc.MON_DEP)) return { ...salida, ok: false, error: "MON_DEP debe ser un monto" };
+  if (!texto(enc.FEC_DEP)) return { ...salida, ok: false, error: "El campo FEC_DEP es obligatorio" };
+  if (fechaInvalida(enc, ["FEC_DEP"])) return { ...salida, ok: false, error: "FEC_DEP debe tener formato YYYY-MM-DD HH:MM:SS" };
+  if (!MONEDAS_DEP.includes(texto(enc.IND_MON))) {
+    return { ...salida, ok: false, error: `IND_MON debe ser ${MONEDAS_DEP.join(" o ")}` };
+  }
+  // Largos de las columnas: se avisa cual no cabe (SQL Server solo dice "would be truncated").
+  const largoEnc = excedeLargo(LARGOS_ENC_DEP, { COD_CIA, COD_BCO, CTA_BCO, NUM_DEP, NOTAS: enc.NOTAS, HandHeld: contexto.handheld });
+  if (largoEnc) return { ...salida, ok: false, error: largoEnc };
+  const docs = new Set();
+  for (const l of lineas) {
+    const NUM_DOC = texto(l && l.NUM_DOC);
+    if (!NUM_DOC) return { ...salida, ok: false, error: "Cada linea debe traer NUM_DOC" };
+    if (docs.has(NUM_DOC)) return { ...salida, ok: false, error: `El documento ${NUM_DOC} viene repetido en el deposito` };
+    docs.add(NUM_DOC);
+    const largoDet = excedeLargo(LARGOS_DET_DEP, { NUM_DOC, REF: l.REF });
+    if (largoDet) return { ...salida, ok: false, error: largoDet };
+    const malMonto = MONTOS_DET_DEP.find((c) => l[c] !== undefined && l[c] !== null && !esMonto(l[c]));
+    if (malMonto) return { ...salida, ok: false, error: `${malMonto} del documento ${NUM_DOC} debe ser un monto` };
+  }
+
+  try {
+    let duplicado = false;
+    let conflicto = null;
+    let CONSEC_DEP = null;
+    await sequelize.transaction(async (transaction) => {
+      // HOLDLOCK: la PK incluye CONSEC_DEP (IDENTITY), asi que la BD no impide el duplicado.
+      const [existe] = await sequelize.query(
+        `SELECT TOP 1 COD_CIA, COD_BCO, CONSEC_DEP FROM COAGRO2.erpadmin.alCXC_ENC_DEP WITH (UPDLOCK, HOLDLOCK)
+          WHERE CTA_BCO = :CTA_BCO AND NUM_DEP = :NUM_DEP`,
+        { replacements: { CTA_BCO, NUM_DEP }, type: QueryTypes.SELECT, transaction }
+      );
+      if (existe) {
+        if (texto(existe.COD_CIA) === COD_CIA && texto(existe.COD_BCO) === COD_BCO) {
+          duplicado = true;
+          CONSEC_DEP = existe.CONSEC_DEP;
+        } else {
+          conflicto =
+            `El deposito ${NUM_DEP} de la cuenta ${CTA_BCO} ya existe ` +
+            `(compania ${texto(existe.COD_CIA)}, banco ${texto(existe.COD_BCO)})`;
+        }
+        return;
+      }
+
+      const valores = {
+        ...tomarColumnas(enc, COLUMNAS_ENC_DEP),
+        COD_CIA, COD_BCO, CTA_BCO, NUM_DEP,
+        HandHeld: contexto.handheld,
+      };
+      const columnas = Object.keys(valores);
+      const params = columnas.map((c) => (c === "FEC_DEP" ? `CONVERT(datetime, :${c}, 120)` : `:${c}`));
+      const [insertado] = await sequelize.query(
+        `INSERT INTO COAGRO2.erpadmin.alCXC_ENC_DEP (${columnas.join(", ")})
+         OUTPUT INSERTED.CONSEC_DEP
+         VALUES (${params.join(", ")})`,
+        { replacements: valores, type: QueryTypes.SELECT, transaction }
+      );
+      CONSEC_DEP = insertado && insertado.CONSEC_DEP;
+
+      for (const l of lineas) {
+        await insertar(
+          "alCXC_DET_DEP",
+          { ...tomarColumnas(l, COLUMNAS_DET_DEP), NUM_DOC: texto(l.NUM_DOC), NUM_DEP, CTA_BCO },
+          [],
+          transaction
+        );
+      }
+    });
+    if (conflicto) return { ...salida, ok: false, conflicto: true, error: conflicto };
+    return { ...salida, ok: true, CONSEC_DEP, duplicado };
+  } catch (e) {
+    console.log(e);
+    return { ...salida, ok: false, error: mensajeError(e) };
+  }
+};
+
 // Separa prefijo y parte numerica igual que la app ('RP10001' -> RP, 10001n). null si no termina en numero.
 const partirConsecutivo = (valor) => {
   const m = /^(.*?)(\d+)$/.exec(valor);
@@ -382,17 +516,19 @@ const procesarConsecutivo = async (contexto, c) => {
   const RUTA = texto(c.RUTA);
   const PEDIDO = texto(c.PEDIDO);
   const FACTURA = texto(c.FACTURA);
+  const RECIBO = texto(c.RECIBO);
   const salida = { RUTA, PEDIDO };
   if (FACTURA) salida.FACTURA = FACTURA;
-  if (!RUTA || (!PEDIDO && !FACTURA)) {
-    return { ...salida, ok: false, error: "RUTA y PEDIDO o FACTURA son obligatorios" };
+  if (RECIBO) salida.RECIBO = RECIBO;
+  if (!RUTA || (!PEDIDO && !FACTURA && !RECIBO)) {
+    return { ...salida, ok: false, error: "RUTA y PEDIDO, FACTURA o RECIBO son obligatorios" };
   }
   if (!contexto.rutas.has(RUTA)) return { ...salida, ok: false, error: `La ruta ${RUTA} no pertenece a esta handheld` };
 
   try {
     return await sequelize.transaction(async (transaction) => {
       const [fila] = await sequelize.query(
-        `SELECT PEDIDO, FACTURA FROM COAGRO2.erpadmin.RUTA_CONSECUT_RT WITH (UPDLOCK) WHERE RUTA = :RUTA`,
+        `SELECT PEDIDO, FACTURA, RECIBO FROM COAGRO2.erpadmin.RUTA_CONSECUT_RT WITH (UPDLOCK) WHERE RUTA = :RUTA`,
         { replacements: { RUTA }, type: QueryTypes.SELECT, transaction }
       );
       if (!fila) return { ...salida, ok: false, error: `La ruta ${RUTA} no tiene consecutivos configurados` };
@@ -402,6 +538,7 @@ const procesarConsecutivo = async (contexto, c) => {
       const campos = [
         { columna: "PEDIDO", valor: PEDIDO, ignorado: "ignorado", actual: "actual" },
         { columna: "FACTURA", valor: FACTURA, ignorado: "ignoradoFactura", actual: "actualFactura" },
+        { columna: "RECIBO", valor: RECIBO, ignorado: "ignoradoRecibo", actual: "actualRecibo" },
       ];
       for (const campo of campos) {
         if (!campo.valor) continue;
@@ -419,7 +556,7 @@ const procesarConsecutivo = async (contexto, c) => {
       if (sets.length) {
         await sequelize.query(
           `UPDATE COAGRO2.erpadmin.RUTA_CONSECUT_RT SET ${sets.join(", ")} WHERE RUTA = :RUTA`,
-          { replacements: { RUTA, PEDIDO, FACTURA }, transaction }
+          { replacements: { RUTA, PEDIDO, FACTURA, RECIBO }, transaction }
         );
       }
       return respuesta;
@@ -436,7 +573,7 @@ const postSyncEnviar = async (req, res) => {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return res.send({ result: {}, success: false, errors: ["El cuerpo debe ser un objeto JSON"] });
     }
-    for (const k of ["ubicaciones", "visitas", "pedidos", "aprobaciones", "consecutivos"]) {
+    for (const k of ["ubicaciones", "visitas", "pedidos", "aprobaciones", "depositos", "consecutivos"]) {
       if (body[k] !== undefined && body[k] !== null && !Array.isArray(body[k])) {
         return res.send({ result: {}, success: false, errors: [`${k} debe ser un arreglo`] });
       }
@@ -445,6 +582,7 @@ const postSyncEnviar = async (req, res) => {
     const visitas = body.visitas || [];
     const pedidos = body.pedidos || [];
     const aprobaciones = body.aprobaciones || [];
+    const depositos = body.depositos || [];
     const consecutivos = body.consecutivos || [];
 
     // Contexto para validar: rutas de la handheld, sus clientes y los articulos de los pedidos.
@@ -463,18 +601,26 @@ const postSyncEnviar = async (req, res) => {
         type: QueryTypes.SELECT,
       })
     );
+    const cuentasBanco = depositos.length
+      ? await sequelize.query(`SELECT COD_CIA, COD_BCO, CTA_BCO FROM COAGRO2.erpadmin.alCXC_CTA_BCO`, {
+          type: QueryTypes.SELECT,
+        })
+      : [];
     const contexto = {
+      cuentasBanco: new Set(cuentasBanco.map((c) => `${texto(c.COD_CIA)}|${texto(c.COD_BCO)}|${texto(c.CTA_BCO)}`)),
       rutas: new Set(req.mobile.codigosRuta),
       asignaciones: new Set(asignaciones.map((a) => `${texto(a.RUTA)}|${texto(a.CLIENTE)}`)),
       articulos: new Set(articulos.map((a) => texto(a.COD_ART))),
+      handheld: texto(req.mobile.handheld && req.mobile.handheld.HANDHELD),
     };
 
-    // Orden: ubicaciones, visitas, pedidos, aprobaciones, consecutivos.
-    const result = { ubicaciones: [], visitas: [], pedidos: [], aprobaciones: [], consecutivos: [] };
+    // Orden: ubicaciones, visitas, pedidos, aprobaciones, depositos, consecutivos.
+    const result = { ubicaciones: [], visitas: [], pedidos: [], aprobaciones: [], depositos: [], consecutivos: [] };
     for (const u of ubicaciones) result.ubicaciones.push(await procesarUbicacion(contexto, u || {}));
     for (const v of visitas) result.visitas.push(await procesarVisita(contexto, v || {}));
     for (const p of pedidos) result.pedidos.push(await procesarPedido(contexto, p || {}));
     for (const a of aprobaciones) result.aprobaciones.push(await procesarAprobacion(contexto, a || {}));
+    for (const d of depositos) result.depositos.push(await procesarDeposito(contexto, d || {}));
     for (const c of consecutivos) result.consecutivos.push(await procesarConsecutivo(contexto, c || {}));
 
     res.send({ result, success: true, errors: [] });
