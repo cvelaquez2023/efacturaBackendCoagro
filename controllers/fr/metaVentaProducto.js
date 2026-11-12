@@ -348,6 +348,10 @@ const actualizarVentasMetas = async (req, res) => {
 // 'D' restando, valor = PRECIO_TOTAL - DESC_TOT_GENERAL), asi la suma del mes cuadra con
 // Venta_Unidades / Venta_Valor de la meta. SEMANA = semana del mes por dias: 1-7 = 1, 8-14 = 2,
 // 15-21 = 3, 22-28 = 4, 29-31 = 5. Solo vienen los dias con movimiento.
+// COSTO = FACTURA_LINEA.COSTO_TOTAL (mismo signo que VALOR) para ganancia/margen en la web.
+// PROVEEDOR/LINEA: codigos de metas (ProveedorMeta/LineaNegocio) si el articulo tiene meta
+// (prioriza la del mismo periodo y vendedor); si no, los del ERP (ARTICULO.PROVEEDOR, ej. EXT-0017,
+// y ARTICULO.CLASIFICACION_1). ORIGEN_CLASIFICACION dice de donde salio ('META' o 'ERP').
 const ventasDiarias = async (req, res) => {
   try {
     const anio = Number(req.query.anio);
@@ -365,12 +369,21 @@ const ventasDiarias = async (req, res) => {
       `SELECT V.VENDEDOR, VE.NOMBRE AS NOMBRE_VENDEDOR, V.ARTICULO, A.DESCRIPCION AS DESCRIPCION_ARTICULO,
               V.DIA, (V.DIA - 1) / 7 + 1 AS SEMANA,
               CONVERT(varchar(10), DATEFROMPARTS(:anio, :mes, V.DIA), 23) AS FECHA,
-              CAST(V.UNIDADES AS float) AS UNIDADES, CAST(V.VALOR AS float) AS VALOR
+              CAST(V.UNIDADES AS float) AS UNIDADES, CAST(V.VALOR AS float) AS VALOR,
+              CAST(V.COSTO AS float) AS COSTO,
+              COALESCE(MT.PROVEEDOR, LTRIM(RTRIM(A.PROVEEDOR))) AS PROVEEDOR,
+              COALESCE(MT.NOMBRE_PROVEEDOR, PR.NOMBRE) AS NOMBRE_PROVEEDOR,
+              COALESCE(MT.LINEA, LTRIM(RTRIM(A.CLASIFICACION_1))) AS LINEA,
+              COALESCE(MT.NOMBRE_LINEA, CL.DESCRIPCION) AS NOMBRE_LINEA,
+              LTRIM(RTRIM(A.PROVEEDOR)) AS PROVEEDOR_ERP,
+              CASE WHEN MT.PROVEEDOR IS NULL THEN 'ERP' ELSE 'META' END AS ORIGEN_CLASIFICACION
          FROM (SELECT LTRIM(RTRIM(f.VENDEDOR)) AS VENDEDOR, LTRIM(RTRIM(fl.ARTICULO)) AS ARTICULO,
                       DAY(f.FECHA) AS DIA,
                       SUM(CASE WHEN f.TIPO_DOCUMENTO = 'D' THEN -1 ELSE 1 END * fl.CANTIDAD) AS UNIDADES,
                       SUM(CASE WHEN f.TIPO_DOCUMENTO = 'D' THEN -1 ELSE 1 END
-                          * (fl.PRECIO_TOTAL - ISNULL(fl.DESC_TOT_GENERAL, 0))) AS VALOR
+                          * (fl.PRECIO_TOTAL - ISNULL(fl.DESC_TOT_GENERAL, 0))) AS VALOR,
+                      SUM(CASE WHEN f.TIPO_DOCUMENTO = 'D' THEN -1 ELSE 1 END
+                          * ISNULL(fl.COSTO_TOTAL, 0)) AS COSTO
                  FROM COAGRO2.CINCOH.FACTURA f
                  JOIN COAGRO2.CINCOH.FACTURA_LINEA fl
                    ON fl.TIPO_DOCUMENTO = f.TIPO_DOCUMENTO AND fl.FACTURA = f.FACTURA
@@ -381,6 +394,16 @@ const ventasDiarias = async (req, res) => {
                 GROUP BY f.VENDEDOR, fl.ARTICULO, DAY(f.FECHA)) V
          LEFT JOIN COAGRO2.CINCOH.VENDEDOR VE ON VE.VENDEDOR = V.VENDEDOR
          LEFT JOIN COAGRO2.CINCOH.ARTICULO A ON A.ARTICULO = V.ARTICULO
+         LEFT JOIN COAGRO2.CINCOH.PROVEEDOR PR ON PR.PROVEEDOR = A.PROVEEDOR
+         LEFT JOIN COAGRO2.CINCOH.CLASIFICACION CL ON CL.CLASIFICACION = A.CLASIFICACION_1
+         OUTER APPLY (SELECT TOP 1 P.codigo AS PROVEEDOR, P.nombre AS NOMBRE_PROVEEDOR,
+                             L.codigo AS LINEA, L.nombre AS NOMBRE_LINEA
+                        FROM COAGRO2.CINCOH.MetaVentaProducto M
+                        JOIN COAGRO2.CINCOH.ProveedorMeta P ON P.id = M.IdProveedor
+                        JOIN COAGRO2.CINCOH.LineaNegocio L ON L.id = M.IdLineaNegocio
+                       WHERE M.Articulo = V.ARTICULO
+                       ORDER BY CASE WHEN M.Anio = :anio AND M.Mes = :mes AND M.Vendedor = V.VENDEDOR THEN 0 ELSE 1 END,
+                                M.Anio DESC, M.Mes DESC) MT
         ORDER BY V.VENDEDOR, V.ARTICULO, V.DIA`,
       { replacements: { anio, mes, desde, hasta, vendedor, articulo }, type: QueryTypes.SELECT }
     );
