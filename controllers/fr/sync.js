@@ -1,11 +1,14 @@
 //
 // Endpoint de sincronización para la handheld. Tablas:
-//   - rutaCliente          -> qué clientes van en cada ruta, día y orden
-//   - erpadmin.cliente     -> datos del cliente (nombre, dirección, etc.)
-//   - rutaRt               -> SOLO el nombre (DESCRIPCION) de cada ruta, para los filtros
+//   - erpadmin.RUTA_CLIENTE -> qué clientes van en cada ruta, día y orden
+//   - erpadmin.cliente      -> datos generales del cliente (nombre, dirección, impuestos, etc.)
+//   - erpadmin.CLIENTE_CIA  -> datos del cliente en la compañía (lista de precios, crédito, etc.)
+//   - erpadmin.SUBTIPO_DOC  -> traduce CLIENTE_CIA.SUBTIPODOC a código + catálogo de subtipos FAC
+//   - rutaRt                -> SOLO el nombre (DESCRIPCION) de cada ruta, para los filtros
 //
 // GET /fr/sync/clientes   (header Authorization: Bearer <token movil>)
 // Solo las rutas asignadas a la handheld del token (ver middleware/mobileSession.js).
+// Los clientes salen de UNA sola consulta (RUTA_CLIENTE + cliente + CLIENTE_CIA).
 //
 // Respuesta:
 // {
@@ -15,28 +18,47 @@
 //     rutas:       [{ RUTA, DESCRIPCION, ACTIVA, PERIODICIDAD }],   -> RUTA_RT
 //     clientes:    [{ COD_ZON, COD_CLT, FEC_PLN, NOM_CLT, DIR_CLT,
 //                     DESGLOSE, TIPO_IMPUESTO, TIPO_TARIFA, PORC_TARIFA,
-//                     NIVEL_PRECIO }],                               -> CLIENTE
+//                     NIVEL_PRECIO,                                  -> CLIENTE
+//                     COD_CIA, LST_PRE, IND_MON, NOM_CTO, ...,
+//                     SUBTIPODOC }],                                 -> CLIENTE_CIA (mismo objeto)
 //     rutaOrden:   [{ RUTA, CLIENTE, DIA, ORDEN }],                 -> alFAC_RUTA_ORDEN
 //     ubicaciones: [],                                              -> CLIENTE_UBICACION (sin fuente)
 //     efectividades: [{ EFECT_VISITA, DESCRIPCION }]                -> EFECT_VISITA_RT (estados de visita)
 //     tiposCliente:  [{ COD_CIA, COD_TIP_CL, DES_TIP_CL }]          -> erpadmin.alFAC_TIP_CLT
 //     nivelesPrecio: [{ NIVEL_PRECIO, COMPANIA, LISTA, MONEDA }]    -> erpadmin.NIVEL_LISTA
+//     subtiposDoc:   [{ COMPANIA, TIPO, SUBTIPO, DESCRIPCION }]     -> erpadmin.SUBTIPO_DOC (TIPO 'FAC')
+//     paises:        [{ COD_PAIS, COD_CIA, NOMBRE, ETIQUETA_DIV_GEO1, ETIQUETA_DIV_GEO2 }] -> erpadmin.alFAC_PAIS
+//     divisiones1:   [{ PAIS, COMPANIA, DIVISION_GEOGRAFICA1, NOMBRE }]                     -> erpadmin.DIVISION_GEOGRAFICA1 (departamentos)
+//     divisiones2:   [{ PAIS, COMPANIA, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, NOMBRE }] -> erpadmin.DIVISION_GEOGRAFICA2 (municipios)
+//     condicionesPago:        [{ COD_CND, COD_CIA, CAN_DIA, DES_CND }]  -> erpadmin.alFAC_CND_PAG
+//     actividadesComerciales: [{ COMPANIA, CODIGO, DESCRIPCION }]       -> erpadmin.ACTIVIDAD_COMERCIAL
 //   }
 // }
 //
 // Notas:
-//  - rutaCliente.CLIENTE es el mismo código que erpadmin.cliente.COD_CLT.
+//  - RUTA_CLIENTE.CLIENTE es el mismo código que erpadmin.cliente.COD_CLT y CLIENTE_CIA.COD_CLT.
 //  - Se genera una fila de cliente por cada (ruta, cliente) asignado; COD_ZON es la ruta de la
 //    ASIGNACIÓN (así un cliente puede estar en varias rutas).
 //  - Una asignación cuyo cliente no existe en erpadmin.cliente (p. ej. "CLI01") no se envía.
+//  - erpadmin.cliente tiene una fila por (COD_CLT, COD_ZON) con su propia FEC_PLN: se usa la fila
+//    cuya COD_ZON es la ruta de la asignación; si no hay, cualquier otra fila del cliente.
+//  - CLIENTE_CIA tiene una sola compañía (CINCOH, una fila por cliente): sus columnas van en el
+//    mismo objeto del cliente. Si un cliente no tiene fila en CLIENTE_CIA, esas columnas van null.
+//    Si algún día hubiera varias compañías por cliente, se toma la de COD_CIA = 'CINCOH' primero.
 //  - Las rutas salen con código y nombre ("001 - VBV"); sin nombre en rutaRt, solo el código.
 //  - Las ubicaciones (GPS) vivían en CLIENTE_RT, que ya no se consulta: se envía lista vacía.
-//  - CLIENTE_CIA se sincroniza aparte en GET /fr/sync/clientesCia.
+//  - GET /fr/sync/clientesCia se mantiene solo para versiones viejas de la app; la app nueva
+//    ya recibe todo aquí.
 //  - Los endpoints de la handheld solo leen tablas de erpadmin; CINCOH (el ERP) solo sirve para
 //    llenar esas tablas, no se consulta desde aqui.
 //  - NIVEL_PRECIO del cliente sale de erpadmin.cliente.NIVEL_PRECIO (nombre del nivel, tal cual).
-//  - tiposCliente y nivelesPrecio salen tal cual de sus tablas (no se numera ni se transforma nada).
-//  - tiposCliente y nivelesPrecio son catálogos completos (no dependen de la ruta).
+//  - tiposCliente, nivelesPrecio, subtiposDoc, paises, divisiones1, divisiones2, condicionesPago y
+//    actividadesComerciales son catálogos completos (no dependen de la ruta) y salen tal cual de
+//    sus tablas. Los usa la pantalla de pedido (país, región, condición de pago, actividad).
+//  - Divisiones geográficas: 1 = departamento, 2 = municipio (hijo de la 1), 3 = distrito (hijo
+//    de la 2). El cliente trae DIVISION_GEOGRAFICA1/2/3 (de CLIENTE_CIA.division_geografica3 para
+//    la 3). No se manda catálogo de distritos: erpadmin no tiene tabla DIVISION_GEOGRAFICA3 y la
+//    del ERP (CINCOH.DIVISION_GEOGRAFICA3) está vacía.
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
@@ -49,7 +71,9 @@ const CAMPOS_CLIENTE_CIA = `COD_CLT, COD_CIA, LST_PRE, IND_MON, NOM_CTO, NUM_TEL
   DIA_CRE, SAL_CRE, LIM_CRE, POR_EXC_VT, POR_EXC_CS, COD_PAIS, COD_TIP_CL, DIR_EMB_DEFAULT,
   DESCUENTO, BODEGA_CONSIGNA, MULT_MON, ACEPTA_FRACCIONES, TIPO_CONTRIBUYENTE, CONTRIBUYENTE,
   DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, REGIMEN_TRIB, LOCALIZACION_CONSIGNA, CODIGO,
-  RAZONSOCIAL, USA_MONTO_TOPE, MONTO_TOPE, CATEGORIA_TIPO_NIT`;
+  RAZONSOCIAL, USA_MONTO_TOPE, MONTO_TOPE, CATEGORIA_TIPO_NIT,
+  division_geografica3 AS DIVISION_GEOGRAFICA3, codActividad, desActividad,
+  nomEncargadoCompras, telEncargadoCompras, nomEncargadoPagos, telEncargadoPagos`;
 
 // SQL Server limita los parametros por consulta (~2100): las listas largas se consultan por lotes.
 const porLotes = async (lista, consulta, tamano = 500) => {
@@ -60,47 +84,50 @@ const porLotes = async (lista, consulta, tamano = 500) => {
   return salida;
 };
 
+// Columnas de CLIENTE_CIA para la consulta unida (con alias CC; sin COD_CLT, que ya viene de cliente).
+const CAMPOS_CLIENTE_CIA_CC = CAMPOS_CLIENTE_CIA.split(",")
+  .map((c) => c.trim())
+  .filter((c) => c && c !== "COD_CLT")
+  // "division_geografica3 AS DIVISION_GEOGRAFICA3" -> "CC.division_geografica3 AS DIVISION_GEOGRAFICA3"
+  .map((c) => `CC.${c}`)
+  .join(", ");
+
 const getSyncClientes = async (req, res) => {
   try {
-    // 1) Asignacion ruta-cliente-dia-orden (tabla rutaCliente) de las rutas de la handheld
-    const asignaciones = await rutaClienteModel.findAll({
-      where: { RUTA: req.mobile.codigosRuta },
-      order: [
-        ["RUTA", "ASC"],
-        ["DIA", "ASC"],
-        ["ORDEN", "ASC"],
-      ],
-      raw: true,
-    });
-
-    // 2) Datos del cliente (erpadmin.cliente), por lotes
-    const codigos = [...new Set(asignaciones.map((a) => String(a.CLIENTE).trim()))];
-    const erpRows = await porLotes(codigos, (lote) =>
-      sequelize.query(
-        `SELECT COD_CLT, NOM_CLT, DIR_CLT, FEC_PLN, DESGLOSE, TIPO_IMPUESTO, TIPO_TARIFA, PORC_TARIFA,
-                NIVEL_PRECIO
-           FROM COAGRO2.erpadmin.cliente
-          WHERE COD_CLT IN (:lote)`,
-        { replacements: { lote }, type: QueryTypes.SELECT }
-      )
+    // 1) Una sola consulta: asignacion ruta-cliente-dia-orden + datos del cliente + CLIENTE_CIA.
+    //    JOIN con cliente: las asignaciones sin cliente en erpadmin.cliente no se envian.
+    const filas = await sequelize.query(
+      `SELECT RC.RUTA, RC.CLIENTE, RC.DIA, RC.ORDEN,
+              C.COD_CLT, C.NOM_CLT, C.DIR_CLT, C.FEC_PLN, C.DESGLOSE, C.TIPO_IMPUESTO,
+              C.TIPO_TARIFA, C.PORC_TARIFA, C.NIVEL_PRECIO,
+              ${CAMPOS_CLIENTE_CIA_CC},
+              S.SUBTIPO AS SUBTIPODOC
+         FROM COAGRO2.erpadmin.RUTA_CLIENTE RC
+        CROSS APPLY (SELECT TOP 1 * FROM COAGRO2.erpadmin.cliente
+                      WHERE COD_CLT = RC.CLIENTE
+                      ORDER BY CASE WHEN COD_ZON = RC.RUTA THEN 0 ELSE 1 END) C
+        OUTER APPLY (SELECT TOP 1 * FROM COAGRO2.erpadmin.CLIENTE_CIA
+                      WHERE COD_CLT = RC.CLIENTE
+                      ORDER BY CASE WHEN COD_CIA = 'CINCOH' THEN 0 ELSE 1 END, COD_CIA) CC
+        OUTER APPLY (SELECT TOP 1 SUBTIPO FROM COAGRO2.erpadmin.SUBTIPO_DOC
+                      WHERE TIPO = 'FAC'
+                        AND LTRIM(RTRIM(DESCRIPCION)) = LTRIM(RTRIM(CC.SUBTIPODOC))
+                      ORDER BY SUBTIPO) S
+        WHERE RC.RUTA IN (:rutas)
+        ORDER BY RC.RUTA, RC.DIA, RC.ORDEN`,
+      { replacements: { rutas: req.mobile.codigosRuta }, type: QueryTypes.SELECT }
     );
-    const erpDeCodigo = new Map();
-    for (const e of erpRows) {
-      const k = String(e.COD_CLT).trim();
-      if (!erpDeCodigo.has(k)) erpDeCodigo.set(k, e);
-    }
 
-    // 3) Un cliente por (ruta, codigo); solo los que existen en erpadmin.cliente
+    // 2) Un cliente por (ruta, codigo); rutaOrden lleva todas las asignaciones (dia/orden)
     const vistos = new Set();
     const clientes = [];
     const rutaOrden = [];
-    for (const a of asignaciones) {
-      const ruta = String(a.RUTA).trim();
-      const codigo = String(a.CLIENTE).trim();
-      const erp = erpDeCodigo.get(codigo);
-      if (!erp) continue;
+    for (const f of filas) {
+      const { RUTA, CLIENTE, DIA, ORDEN, COD_CLT, ...datos } = f;
+      const ruta = String(RUTA).trim();
+      const codigo = String(CLIENTE).trim();
 
-      rutaOrden.push({ RUTA: a.RUTA, CLIENTE: a.CLIENTE, DIA: a.DIA, ORDEN: a.ORDEN });
+      rutaOrden.push({ RUTA, CLIENTE, DIA, ORDEN });
 
       const clave = `${ruta}|${codigo}`;
       if (vistos.has(clave)) continue;
@@ -108,14 +135,9 @@ const getSyncClientes = async (req, res) => {
       clientes.push({
         COD_ZON: ruta,
         COD_CLT: codigo,
-        NOM_CLT: erp.NOM_CLT ?? "",
-        DIR_CLT: erp.DIR_CLT ?? "",
-        FEC_PLN: erp.FEC_PLN ?? null,
-        DESGLOSE: erp.DESGLOSE ?? null,
-        TIPO_IMPUESTO: erp.TIPO_IMPUESTO ?? null,
-        TIPO_TARIFA: erp.TIPO_TARIFA ?? null,
-        PORC_TARIFA: erp.PORC_TARIFA ?? null,
-        NIVEL_PRECIO: erp.NIVEL_PRECIO ?? null,
+        ...datos,
+        NOM_CLT: datos.NOM_CLT ?? "",
+        DIR_CLT: datos.DIR_CLT ?? "",
       });
     }
 
@@ -138,7 +160,20 @@ const getSyncClientes = async (req, res) => {
 
     // 5) Estados de visita (erpadmin.EFECT_VISITA_RT): alimentan el combo Estado del registro de visita.
     // 6) Catalogos de tipos de cliente (erpadmin.alFAC_TIP_CLT) y niveles de precio (erpadmin.NIVEL_LISTA).
-    const [efectividades, tiposCliente, nivelesPrecio] = await Promise.all([
+    // 7) Catalogo de subtipos de factura (erpadmin.SUBTIPO_DOC, TIPO 'FAC').
+    // 8) Catalogos de la pantalla de pedido: paises, divisiones geograficas, condiciones de pago
+    //    y actividades comerciales.
+    const [
+      efectividades,
+      tiposCliente,
+      nivelesPrecio,
+      subtiposDoc,
+      paises,
+      divisiones1,
+      divisiones2,
+      condicionesPago,
+      actividadesComerciales,
+    ] = await Promise.all([
       sequelize.query(
         `SELECT EFECT_VISITA, DESCRIPCION FROM COAGRO2.erpadmin.EFECT_VISITA_RT ORDER BY EFECT_VISITA`,
         { type: QueryTypes.SELECT }
@@ -153,6 +188,43 @@ const getSyncClientes = async (req, res) => {
           ORDER BY NIVEL_PRECIO, MONEDA`,
         { type: QueryTypes.SELECT }
       ),
+      sequelize.query(
+        `SELECT COMPANIA, TIPO, SUBTIPO, DESCRIPCION
+           FROM COAGRO2.erpadmin.SUBTIPO_DOC
+          WHERE TIPO = 'FAC'
+          ORDER BY SUBTIPO`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT COD_PAIS, COD_CIA, NOMBRE, ETIQUETA_DIV_GEO1, ETIQUETA_DIV_GEO2
+           FROM COAGRO2.erpadmin.alFAC_PAIS
+          ORDER BY COD_CIA, COD_PAIS`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT PAIS, COMPANIA, DIVISION_GEOGRAFICA1, NOMBRE
+           FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA1
+          ORDER BY PAIS, DIVISION_GEOGRAFICA1`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT PAIS, COMPANIA, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, NOMBRE
+           FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA2
+          ORDER BY PAIS, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT COD_CND, COD_CIA, CAN_DIA, DES_CND
+           FROM COAGRO2.erpadmin.alFAC_CND_PAG
+          ORDER BY COD_CIA, CAN_DIA, COD_CND`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT COMPANIA, CODIGO, DESCRIPCION
+           FROM COAGRO2.erpadmin.ACTIVIDAD_COMERCIAL
+          ORDER BY COMPANIA, CODIGO`,
+        { type: QueryTypes.SELECT }
+      ),
     ]);
 
     res.send({
@@ -164,6 +236,12 @@ const getSyncClientes = async (req, res) => {
         efectividades,
         tiposCliente,
         nivelesPrecio,
+        subtiposDoc,
+        paises,
+        divisiones1,
+        divisiones2,
+        condicionesPago,
+        actividadesComerciales,
       },
       success: true,
       errors: [],
@@ -704,6 +782,8 @@ const getSyncConsecutivos = async (req, res) => {
 
 //
 // GET /fr/sync/clientesCia   (header Authorization: Bearer <token movil>)
+// OBSOLETO: GET /fr/sync/clientes ya trae CLIENTE_CIA y subtiposDoc. Se deja solo para
+// versiones viejas de la app; quitarlo cuando todas usen /fr/sync/clientes.
 // Solo los clientes asignados a las rutas de la handheld del token.
 //
 // Tablas:
