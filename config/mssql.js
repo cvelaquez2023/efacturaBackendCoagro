@@ -11,6 +11,15 @@ Sequelize.DATE.prototype._stringify = function (date, options) {
   return date.format("YYYY-MM-DD HH:mm:ss.SSS");
 };
 
+/**
+ * SQL Server: las columnas `date` (DataTypes.DATEONLY) llegan de tedious como
+ * medianoche UTC, y Sequelize las formateaba en hora local (UTC-6), devolviendo
+ * el dia anterior (se guardaba 2026-01-01 y se leia 2025-12-31). Se formatea en
+ * UTC. Debe ir antes de `new Sequelize` (el parser se registra al conectar).
+ */
+const moment = require("moment");
+Sequelize.DataTypes.mssql.DATEONLY.parse = (value) => moment.utc(value).format("YYYY-MM-DD");
+
 const database = process.env.SQL_DATABASE;
 const username = process.env.SQL_USER;
 const password = process.env.SQL_PASSWORD;

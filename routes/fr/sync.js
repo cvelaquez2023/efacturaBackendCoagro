@@ -2,8 +2,9 @@
 // (header Authorization: Bearer <token>) y rol RUTA. Las rutas salen de la
 // handheld del token (RUTA_ASIGNADA_RT), no de la URL.
 // Queda como GET /fr/sync/clientes, /clientesCia, /articulos, /lotes, /precios, /cobros, /cobrosAgente, /consecutivos, /configuracion, /cotizaciones, /historialPedidos, /historialFacturas,
-// /historialPedidosRuta y /historialFacturasRuta,
-// y POST /fr/sync/enviar (la handheld sube lo registrado sin conexion).
+// /historialPedidosRuta, /historialFacturasRuta, /cuentasBanco, /recibosPendientes, /metas, /descuentos,
+// /promociones, /promocionesProductos, /promocionesDestinos y /promocionales,
+// y POST /fr/sync/enviar (la handheld sube lo registrado sin conexion, incluidos depositos).
 
 const { Router } = require("express");
 const compression = require("compression");
@@ -24,6 +25,14 @@ const {
   getSyncHistorialPedidosRuta,
   getSyncHistorialFacturasRuta,
   getSyncLotes,
+  getSyncCuentasBanco,
+  getSyncRecibosPendientes,
+  getSyncMetas,
+  getSyncDescuentos,
+  getSyncPromociones,
+  getSyncPromocionesProductos,
+  getSyncPromocionesDestinos,
+  getSyncPromocionales,
 } = require("../../controllers/fr/sync");
 const { postSyncEnviar } = require("../../controllers/fr/syncEnviar");
 
@@ -48,6 +57,14 @@ router.get("/historialPedidos", getSyncHistorialPedidos);
 router.get("/historialFacturas", getSyncHistorialFacturas);
 router.get("/historialPedidosRuta", getSyncHistorialPedidosRuta);
 router.get("/historialFacturasRuta", getSyncHistorialFacturasRuta);
+router.get("/cuentasBanco", getSyncCuentasBanco);
+router.get("/recibosPendientes", getSyncRecibosPendientes);
+router.get("/metas", getSyncMetas);
+router.get("/descuentos", getSyncDescuentos);
+router.get("/promociones", getSyncPromociones);
+router.get("/promocionesProductos", getSyncPromocionesProductos);
+router.get("/promocionesDestinos", getSyncPromocionesDestinos);
+router.get("/promocionales", getSyncPromocionales);
 router.post("/enviar", postSyncEnviar);
 
 module.exports = router;

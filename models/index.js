@@ -58,6 +58,19 @@ const models = {
   rutaClienteModel: require("./fr/RutaCliente"),
   rutaConsecutRtModel: require("./fr/RutaConsecutRt"),
   configHhModel: require("./fr/ConfigHh"),
+  efectividadVisitaModel: require("./fr/EfectividadVisita"),
+  lineaNegocioModel: require("./fr/LineaNegocio"),
+  liderModel: require("./fr/Lider"),
+  proveedorMetaModel: require("./fr/ProveedorMeta"),
+  metaVentaProductoModel: require("./fr/MetaVentaProducto"),
+  frCondicionClienteModel: require("./fr/FrCondicionCliente"),
+  frPromocionModel: require("./fr/FrPromocion"),
+  frPromocionProductoModel: require("./fr/FrPromocionProducto"),
+  frPromocionDestinoModel: require("./fr/FrPromocionDestino"),
+  descuentoCliartModel: require("./fr/DescuentoCliart"),
+  descuentoNivelModel: require("./fr/DescuentoNivel"),
+  bonificacionCliartModel: require("./fr/BonificacionCliart"),
+  bonificacionNivelModel: require("./fr/BonificacionNivel"),
 };
 
 module.exports = models;

@@ -1,11 +1,14 @@
 //
 // Endpoint de sincronización para la handheld. Tablas:
-//   - rutaCliente          -> qué clientes van en cada ruta, día y orden
-//   - erpadmin.cliente     -> datos del cliente (nombre, dirección, etc.)
-//   - rutaRt               -> SOLO el nombre (DESCRIPCION) de cada ruta, para los filtros
+//   - erpadmin.RUTA_CLIENTE -> qué clientes van en cada ruta, día y orden
+//   - erpadmin.cliente      -> datos generales del cliente (nombre, dirección, impuestos, etc.)
+//   - erpadmin.CLIENTE_CIA  -> datos del cliente en la compañía (lista de precios, crédito, etc.)
+//   - erpadmin.SUBTIPO_DOC  -> traduce CLIENTE_CIA.SUBTIPODOC a código + catálogo de subtipos FAC
+//   - rutaRt                -> SOLO el nombre (DESCRIPCION) de cada ruta, para los filtros
 //
 // GET /fr/sync/clientes   (header Authorization: Bearer <token movil>)
 // Solo las rutas asignadas a la handheld del token (ver middleware/mobileSession.js).
+// Los clientes salen de UNA sola consulta (RUTA_CLIENTE + cliente + CLIENTE_CIA).
 //
 // Respuesta:
 // {
@@ -15,28 +18,47 @@
 //     rutas:       [{ RUTA, DESCRIPCION, ACTIVA, PERIODICIDAD }],   -> RUTA_RT
 //     clientes:    [{ COD_ZON, COD_CLT, FEC_PLN, NOM_CLT, DIR_CLT,
 //                     DESGLOSE, TIPO_IMPUESTO, TIPO_TARIFA, PORC_TARIFA,
-//                     NIVEL_PRECIO }],                               -> CLIENTE
+//                     NIVEL_PRECIO,                                  -> CLIENTE
+//                     COD_CIA, LST_PRE, IND_MON, NOM_CTO, ...,
+//                     SUBTIPODOC }],                                 -> CLIENTE_CIA (mismo objeto)
 //     rutaOrden:   [{ RUTA, CLIENTE, DIA, ORDEN }],                 -> alFAC_RUTA_ORDEN
 //     ubicaciones: [],                                              -> CLIENTE_UBICACION (sin fuente)
 //     efectividades: [{ EFECT_VISITA, DESCRIPCION }]                -> EFECT_VISITA_RT (estados de visita)
 //     tiposCliente:  [{ COD_CIA, COD_TIP_CL, DES_TIP_CL }]          -> erpadmin.alFAC_TIP_CLT
 //     nivelesPrecio: [{ NIVEL_PRECIO, COMPANIA, LISTA, MONEDA }]    -> erpadmin.NIVEL_LISTA
+//     subtiposDoc:   [{ COMPANIA, TIPO, SUBTIPO, DESCRIPCION }]     -> erpadmin.SUBTIPO_DOC (TIPO 'FAC')
+//     paises:        [{ COD_PAIS, COD_CIA, NOMBRE, ETIQUETA_DIV_GEO1, ETIQUETA_DIV_GEO2 }] -> erpadmin.alFAC_PAIS
+//     divisiones1:   [{ PAIS, COMPANIA, DIVISION_GEOGRAFICA1, NOMBRE }]                     -> erpadmin.DIVISION_GEOGRAFICA1 (departamentos)
+//     divisiones2:   [{ PAIS, COMPANIA, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, NOMBRE }] -> erpadmin.DIVISION_GEOGRAFICA2 (municipios)
+//     condicionesPago:        [{ COD_CND, COD_CIA, CAN_DIA, DES_CND }]  -> erpadmin.alFAC_CND_PAG
+//     actividadesComerciales: [{ COMPANIA, CODIGO, DESCRIPCION }]       -> erpadmin.ACTIVIDAD_COMERCIAL
 //   }
 // }
 //
 // Notas:
-//  - rutaCliente.CLIENTE es el mismo código que erpadmin.cliente.COD_CLT.
+//  - RUTA_CLIENTE.CLIENTE es el mismo código que erpadmin.cliente.COD_CLT y CLIENTE_CIA.COD_CLT.
 //  - Se genera una fila de cliente por cada (ruta, cliente) asignado; COD_ZON es la ruta de la
 //    ASIGNACIÓN (así un cliente puede estar en varias rutas).
 //  - Una asignación cuyo cliente no existe en erpadmin.cliente (p. ej. "CLI01") no se envía.
+//  - erpadmin.cliente tiene una fila por (COD_CLT, COD_ZON) con su propia FEC_PLN: se usa la fila
+//    cuya COD_ZON es la ruta de la asignación; si no hay, cualquier otra fila del cliente.
+//  - CLIENTE_CIA tiene una sola compañía (CINCOH, una fila por cliente): sus columnas van en el
+//    mismo objeto del cliente. Si un cliente no tiene fila en CLIENTE_CIA, esas columnas van null.
+//    Si algún día hubiera varias compañías por cliente, se toma la de COD_CIA = 'CINCOH' primero.
 //  - Las rutas salen con código y nombre ("001 - VBV"); sin nombre en rutaRt, solo el código.
 //  - Las ubicaciones (GPS) vivían en CLIENTE_RT, que ya no se consulta: se envía lista vacía.
-//  - CLIENTE_CIA se sincroniza aparte en GET /fr/sync/clientesCia.
+//  - GET /fr/sync/clientesCia se mantiene solo para versiones viejas de la app; la app nueva
+//    ya recibe todo aquí.
 //  - Los endpoints de la handheld solo leen tablas de erpadmin; CINCOH (el ERP) solo sirve para
 //    llenar esas tablas, no se consulta desde aqui.
 //  - NIVEL_PRECIO del cliente sale de erpadmin.cliente.NIVEL_PRECIO (nombre del nivel, tal cual).
-//  - tiposCliente y nivelesPrecio salen tal cual de sus tablas (no se numera ni se transforma nada).
-//  - tiposCliente y nivelesPrecio son catálogos completos (no dependen de la ruta).
+//  - tiposCliente, nivelesPrecio, subtiposDoc, paises, divisiones1, divisiones2, condicionesPago y
+//    actividadesComerciales son catálogos completos (no dependen de la ruta) y salen tal cual de
+//    sus tablas. Los usa la pantalla de pedido (país, región, condición de pago, actividad).
+//  - Divisiones geográficas: 1 = departamento, 2 = municipio (hijo de la 1), 3 = distrito (hijo
+//    de la 2). El cliente trae DIVISION_GEOGRAFICA1/2/3 (de CLIENTE_CIA.division_geografica3 para
+//    la 3). No se manda catálogo de distritos: erpadmin no tiene tabla DIVISION_GEOGRAFICA3 y la
+//    del ERP (CINCOH.DIVISION_GEOGRAFICA3) está vacía.
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
@@ -49,7 +71,9 @@ const CAMPOS_CLIENTE_CIA = `COD_CLT, COD_CIA, LST_PRE, IND_MON, NOM_CTO, NUM_TEL
   DIA_CRE, SAL_CRE, LIM_CRE, POR_EXC_VT, POR_EXC_CS, COD_PAIS, COD_TIP_CL, DIR_EMB_DEFAULT,
   DESCUENTO, BODEGA_CONSIGNA, MULT_MON, ACEPTA_FRACCIONES, TIPO_CONTRIBUYENTE, CONTRIBUYENTE,
   DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, REGIMEN_TRIB, LOCALIZACION_CONSIGNA, CODIGO,
-  RAZONSOCIAL, USA_MONTO_TOPE, MONTO_TOPE, CATEGORIA_TIPO_NIT`;
+  RAZONSOCIAL, USA_MONTO_TOPE, MONTO_TOPE, CATEGORIA_TIPO_NIT,
+  division_geografica3 AS DIVISION_GEOGRAFICA3, codActividad, desActividad,
+  nomEncargadoCompras, telEncargadoCompras, nomEncargadoPagos, telEncargadoPagos`;
 
 // SQL Server limita los parametros por consulta (~2100): las listas largas se consultan por lotes.
 const porLotes = async (lista, consulta, tamano = 500) => {
@@ -60,47 +84,50 @@ const porLotes = async (lista, consulta, tamano = 500) => {
   return salida;
 };
 
+// Columnas de CLIENTE_CIA para la consulta unida (con alias CC; sin COD_CLT, que ya viene de cliente).
+const CAMPOS_CLIENTE_CIA_CC = CAMPOS_CLIENTE_CIA.split(",")
+  .map((c) => c.trim())
+  .filter((c) => c && c !== "COD_CLT")
+  // "division_geografica3 AS DIVISION_GEOGRAFICA3" -> "CC.division_geografica3 AS DIVISION_GEOGRAFICA3"
+  .map((c) => `CC.${c}`)
+  .join(", ");
+
 const getSyncClientes = async (req, res) => {
   try {
-    // 1) Asignacion ruta-cliente-dia-orden (tabla rutaCliente) de las rutas de la handheld
-    const asignaciones = await rutaClienteModel.findAll({
-      where: { RUTA: req.mobile.codigosRuta },
-      order: [
-        ["RUTA", "ASC"],
-        ["DIA", "ASC"],
-        ["ORDEN", "ASC"],
-      ],
-      raw: true,
-    });
-
-    // 2) Datos del cliente (erpadmin.cliente), por lotes
-    const codigos = [...new Set(asignaciones.map((a) => String(a.CLIENTE).trim()))];
-    const erpRows = await porLotes(codigos, (lote) =>
-      sequelize.query(
-        `SELECT COD_CLT, NOM_CLT, DIR_CLT, FEC_PLN, DESGLOSE, TIPO_IMPUESTO, TIPO_TARIFA, PORC_TARIFA,
-                NIVEL_PRECIO
-           FROM COAGRO2.erpadmin.cliente
-          WHERE COD_CLT IN (:lote)`,
-        { replacements: { lote }, type: QueryTypes.SELECT }
-      )
+    // 1) Una sola consulta: asignacion ruta-cliente-dia-orden + datos del cliente + CLIENTE_CIA.
+    //    JOIN con cliente: las asignaciones sin cliente en erpadmin.cliente no se envian.
+    const filas = await sequelize.query(
+      `SELECT RC.RUTA, RC.CLIENTE, RC.DIA, RC.ORDEN,
+              C.COD_CLT, C.NOM_CLT, C.DIR_CLT, C.FEC_PLN, C.DESGLOSE, C.TIPO_IMPUESTO,
+              C.TIPO_TARIFA, C.PORC_TARIFA, C.NIVEL_PRECIO,
+              ${CAMPOS_CLIENTE_CIA_CC},
+              S.SUBTIPO AS SUBTIPODOC
+         FROM COAGRO2.erpadmin.RUTA_CLIENTE RC
+        CROSS APPLY (SELECT TOP 1 * FROM COAGRO2.erpadmin.cliente
+                      WHERE COD_CLT = RC.CLIENTE
+                      ORDER BY CASE WHEN COD_ZON = RC.RUTA THEN 0 ELSE 1 END) C
+        OUTER APPLY (SELECT TOP 1 * FROM COAGRO2.erpadmin.CLIENTE_CIA
+                      WHERE COD_CLT = RC.CLIENTE
+                      ORDER BY CASE WHEN COD_CIA = 'CINCOH' THEN 0 ELSE 1 END, COD_CIA) CC
+        OUTER APPLY (SELECT TOP 1 SUBTIPO FROM COAGRO2.erpadmin.SUBTIPO_DOC
+                      WHERE TIPO = 'FAC'
+                        AND LTRIM(RTRIM(DESCRIPCION)) = LTRIM(RTRIM(CC.SUBTIPODOC))
+                      ORDER BY SUBTIPO) S
+        WHERE RC.RUTA IN (:rutas)
+        ORDER BY RC.RUTA, RC.DIA, RC.ORDEN`,
+      { replacements: { rutas: req.mobile.codigosRuta }, type: QueryTypes.SELECT }
     );
-    const erpDeCodigo = new Map();
-    for (const e of erpRows) {
-      const k = String(e.COD_CLT).trim();
-      if (!erpDeCodigo.has(k)) erpDeCodigo.set(k, e);
-    }
 
-    // 3) Un cliente por (ruta, codigo); solo los que existen en erpadmin.cliente
+    // 2) Un cliente por (ruta, codigo); rutaOrden lleva todas las asignaciones (dia/orden)
     const vistos = new Set();
     const clientes = [];
     const rutaOrden = [];
-    for (const a of asignaciones) {
-      const ruta = String(a.RUTA).trim();
-      const codigo = String(a.CLIENTE).trim();
-      const erp = erpDeCodigo.get(codigo);
-      if (!erp) continue;
+    for (const f of filas) {
+      const { RUTA, CLIENTE, DIA, ORDEN, COD_CLT, ...datos } = f;
+      const ruta = String(RUTA).trim();
+      const codigo = String(CLIENTE).trim();
 
-      rutaOrden.push({ RUTA: a.RUTA, CLIENTE: a.CLIENTE, DIA: a.DIA, ORDEN: a.ORDEN });
+      rutaOrden.push({ RUTA, CLIENTE, DIA, ORDEN });
 
       const clave = `${ruta}|${codigo}`;
       if (vistos.has(clave)) continue;
@@ -108,14 +135,9 @@ const getSyncClientes = async (req, res) => {
       clientes.push({
         COD_ZON: ruta,
         COD_CLT: codigo,
-        NOM_CLT: erp.NOM_CLT ?? "",
-        DIR_CLT: erp.DIR_CLT ?? "",
-        FEC_PLN: erp.FEC_PLN ?? null,
-        DESGLOSE: erp.DESGLOSE ?? null,
-        TIPO_IMPUESTO: erp.TIPO_IMPUESTO ?? null,
-        TIPO_TARIFA: erp.TIPO_TARIFA ?? null,
-        PORC_TARIFA: erp.PORC_TARIFA ?? null,
-        NIVEL_PRECIO: erp.NIVEL_PRECIO ?? null,
+        ...datos,
+        NOM_CLT: datos.NOM_CLT ?? "",
+        DIR_CLT: datos.DIR_CLT ?? "",
       });
     }
 
@@ -138,7 +160,20 @@ const getSyncClientes = async (req, res) => {
 
     // 5) Estados de visita (erpadmin.EFECT_VISITA_RT): alimentan el combo Estado del registro de visita.
     // 6) Catalogos de tipos de cliente (erpadmin.alFAC_TIP_CLT) y niveles de precio (erpadmin.NIVEL_LISTA).
-    const [efectividades, tiposCliente, nivelesPrecio] = await Promise.all([
+    // 7) Catalogo de subtipos de factura (erpadmin.SUBTIPO_DOC, TIPO 'FAC').
+    // 8) Catalogos de la pantalla de pedido: paises, divisiones geograficas, condiciones de pago
+    //    y actividades comerciales.
+    const [
+      efectividades,
+      tiposCliente,
+      nivelesPrecio,
+      subtiposDoc,
+      paises,
+      divisiones1,
+      divisiones2,
+      condicionesPago,
+      actividadesComerciales,
+    ] = await Promise.all([
       sequelize.query(
         `SELECT EFECT_VISITA, DESCRIPCION FROM COAGRO2.erpadmin.EFECT_VISITA_RT ORDER BY EFECT_VISITA`,
         { type: QueryTypes.SELECT }
@@ -153,6 +188,43 @@ const getSyncClientes = async (req, res) => {
           ORDER BY NIVEL_PRECIO, MONEDA`,
         { type: QueryTypes.SELECT }
       ),
+      sequelize.query(
+        `SELECT COMPANIA, TIPO, SUBTIPO, DESCRIPCION
+           FROM COAGRO2.erpadmin.SUBTIPO_DOC
+          WHERE TIPO = 'FAC'
+          ORDER BY SUBTIPO`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT COD_PAIS, COD_CIA, NOMBRE, ETIQUETA_DIV_GEO1, ETIQUETA_DIV_GEO2
+           FROM COAGRO2.erpadmin.alFAC_PAIS
+          ORDER BY COD_CIA, COD_PAIS`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT PAIS, COMPANIA, DIVISION_GEOGRAFICA1, NOMBRE
+           FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA1
+          ORDER BY PAIS, DIVISION_GEOGRAFICA1`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT PAIS, COMPANIA, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, NOMBRE
+           FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA2
+          ORDER BY PAIS, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT COD_CND, COD_CIA, CAN_DIA, DES_CND
+           FROM COAGRO2.erpadmin.alFAC_CND_PAG
+          ORDER BY COD_CIA, CAN_DIA, COD_CND`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT COMPANIA, CODIGO, DESCRIPCION
+           FROM COAGRO2.erpadmin.ACTIVIDAD_COMERCIAL
+          ORDER BY COMPANIA, CODIGO`,
+        { type: QueryTypes.SELECT }
+      ),
     ]);
 
     res.send({
@@ -164,6 +236,12 @@ const getSyncClientes = async (req, res) => {
         efectividades,
         tiposCliente,
         nivelesPrecio,
+        subtiposDoc,
+        paises,
+        divisiones1,
+        divisiones2,
+        condicionesPago,
+        actividadesComerciales,
       },
       success: true,
       errors: [],
@@ -704,6 +782,8 @@ const getSyncConsecutivos = async (req, res) => {
 
 //
 // GET /fr/sync/clientesCia   (header Authorization: Bearer <token movil>)
+// OBSOLETO: GET /fr/sync/clientes ya trae CLIENTE_CIA y subtiposDoc. Se deja solo para
+// versiones viejas de la app; quitarlo cuando todas usen /fr/sync/clientes.
 // Solo los clientes asignados a las rutas de la handheld del token.
 //
 // Tablas:
@@ -897,12 +977,18 @@ const agruparPorDocumento = (filas) => {
 const SIN_MONTOS = { totalMercaderia: 0, descuentoVolumen: 0, subtotal: 0, iva: 0, granTotal: 0 };
 
 // Montos sobre una expresion de monto por linea (`monto`), limitados a las lineas que cumplan `donde`.
-const sqlMontos = (monto) => `
+// IVA truncado a 2 decimales (ROUND(..., 2, 1) trunca, no redondea) y granTotal = subtotal + ese IVA,
+// igual que el ERP; con * 1.13 directo salia a veces un centavo de mas.
+const sqlMontos = (monto) => {
+  const subtotal = `ISNULL(SUM(CASE WHEN D.EST_BON = 'V' THEN ${monto} END), 0)`;
+  const iva = `ROUND(${subtotal} * 0.13, 2, 1)`;
+  return `
   ISNULL(SUM(${monto}), 0) AS totalMercaderia,
   ISNULL(SUM(CASE WHEN D.EST_BON = 'B' THEN ${monto} END), 0) AS descuentoVolumen,
-  ISNULL(SUM(CASE WHEN D.EST_BON = 'V' THEN ${monto} END), 0) AS subtotal,
-  ISNULL(SUM(CASE WHEN D.EST_BON = 'V' THEN ${monto} END), 0) * 0.13 AS iva,
-  ISNULL(SUM(CASE WHEN D.EST_BON = 'V' THEN ${monto} END), 0) * 1.13 AS granTotal`;
+  ${subtotal} AS subtotal,
+  ${iva} AS iva,
+  ${subtotal} + ${iva} AS granTotal`;
+};
 
 //
 // GET /fr/sync/historialPedidos?cliente=04372   (header Authorization: Bearer <token movil>)
@@ -954,7 +1040,7 @@ const sqlMontos = (monto) => `
 //    (cantidad = CANT_FAC del pedido).
 //  - montos: solo sobre las lineas pendientes (EST_LN = 'N'), con (MONT_LN - MONT_DESC):
 //      totalMercaderia = todas, descuentoVolumen = EST_BON 'B', subtotal = EST_BON 'V',
-//      iva = subtotal * 0.13, granTotal = subtotal * 1.13.
+//      iva = subtotal * 0.13 truncado a 2 decimales, granTotal = subtotal + iva.
 //    null si el pedido no tiene lineas pendientes (todo facturado).
 //  - Un mismo pedido repetido en dos rutas sale una sola vez (con la menor de mis rutas).
 //  - Orden: fecha descendente. FEC_PED como texto 'YYYY-MM-DD HH:MM:SS'. Textos sin espacios al final.
@@ -1130,8 +1216,8 @@ const getSyncHistorialPedidos = async (req, res) => {
 //    asi que total = MONT_LN (restarle MONT_DESC contaria el descuento dos veces).
 //    PRC_DESC = MONT_DESC / (PRE_UNI * CANT_FAC) * 100, redondeado a 2 (la tabla no lo trae; 0 si no aplica).
 //  - Montos, todos sobre MONT_LN: totalMercaderia = todas las lineas, descuentoVolumen = EST_BON 'B',
-//    subtotal = EST_BON 'V', iva = subtotal * 0.13, granTotal = subtotal * 1.13 (cuadra con MON_FAC
-//    salvo centavos de redondeo del ERP). Una factura sin lineas de ese tipo lleva 0.
+//    subtotal = EST_BON 'V', iva = subtotal * 0.13 truncado a 2 decimales (como el ERP),
+//    granTotal = subtotal + iva (cuadra con MON_FAC). Una factura sin lineas de ese tipo lleva 0.
 //  - Anuladas (ANULAR = 'S') SI vienen, con anulada: true, para que la app las marque.
 //  - AGENTE / NOMBRE_AGENTE: vendedor de la factura, codigo del ERP (VBV, VCZ...).
 //      AGENTE        = ESTADO_COMPROBANTE (la carga guarda ahi el vendedor de la factura del ERP); si viene
@@ -1324,7 +1410,487 @@ const getSyncHistorialFacturasRuta = async (req, res) => {
   }
 };
 
+//
+// GET /fr/sync/cuentasBanco   (header Authorization: Bearer <token movil>)
+// Cuentas bancarias donde el vendedor puede depositar lo cobrado. La app las usa para
+// armar el encabezado de POST /fr/sync/enviar -> depositos (COD_CIA, COD_BCO, CTA_BCO).
+// No dependen de la ruta: se mandan todas.
+//
+// Tabla: erpadmin.alCXC_CTA_BCO (PK COD_CIA + COD_BCO + CTA_BCO)
+//
+// Respuesta: { result: { cuentas: [{ COD_CIA, COD_BCO, CTA_BCO, NOM_CTA, MONEDA }] } }
+//
+const getSyncCuentasBanco = async (req, res) => {
+  try {
+    const cuentas = await sequelize.query(
+      `SELECT LTRIM(RTRIM(COD_CIA)) AS COD_CIA, LTRIM(RTRIM(COD_BCO)) AS COD_BCO,
+              LTRIM(RTRIM(CTA_BCO)) AS CTA_BCO, LTRIM(RTRIM(NOM_CTA)) AS NOM_CTA,
+              LTRIM(RTRIM(MONEDA)) AS MONEDA
+         FROM COAGRO2.erpadmin.alCXC_CTA_BCO
+        ORDER BY COD_CIA, COD_BCO, CTA_BCO`,
+      { type: QueryTypes.SELECT }
+    );
+
+    res.send({
+      result: { cuentas },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de cuentas bancarias"],
+    });
+  }
+};
+
+//
+// GET /fr/sync/recibosPendientes   (header Authorization: Bearer <token movil>)
+// Recibos (cobros) que la handheld envio con POST /fr/sync/enviar -> depositos y que control aun
+// no aplica en el ERP. La app los usa para mostrarlos, reimprimirlos y descontarlos del saldo del
+// documento mientras siguen pendientes.
+//
+// Tablas:
+//   - erpadmin.alCXC_ENC_DEP      -> encabezado del recibo (NUM_DEP = numero de recibo)
+//   - erpadmin.alCXC_DET_DEP      -> lineas, una por documento (se une por NUM_DEP + CTA_BCO, como el envio)
+//   - erpadmin.alCXC_CTA_BCO      -> NOM_CTA (COD_CIA + COD_BCO + CTA_BCO)
+//   - erpadmin.alCXC_PEN_COB      -> COD_CLT, COD_ZON, COD_TIP_DC, CLASE_DOCUMENTO del documento (NUM_DOC)
+//   - erpadmin.alFAC_ENC_HIST_FAC -> respaldo de COD_CLT y COD_ZON si el documento ya no esta en PEN_COB
+//   - erpadmin.cliente            -> NOM_CLT
+//
+// Filtro: ISNULL(DOC_PRO, 'N') = 'N' (pendiente; los 'S' ya los aplico control y no se envian) y
+// HandHeld = la handheld del token. No se filtra por ruta: el recibo es de la handheld.
+//
+// Cliente y ruta: ENC/DET no los guardan; salen de NUM_DOC. Primero alCXC_PEN_COB y, si el documento
+// ya se cancelo, alFAC_ENC_HIST_FAC (la misma tabla de /historialFacturasRuta), que no tiene
+// COD_TIP_DC ni CLASE_DOCUMENTO (van null). OUTER APPLY TOP 1 (primero la misma compania y una ruta
+// de la handheld) para no duplicar lineas. Si no se encuentra, esos campos van null y la linea se envia.
+//
+// Respuesta:
+// { result: { recibos: [{ NUM_DEP, COD_CIA, COD_BCO, CTA_BCO, NOM_CTA, MON_DEP, FEC_DEP, IND_MON,
+//                         NOTAS, DOC_PRO, CONSEC_DEP,
+//                         lineas: [{ NUM_DOC, COD_TIP_DC, CLASE_DOCUMENTO, COD_CLT, NOM_CLT, COD_ZON,
+//                                    MON_EFE, MON_CHE, MON_DEP, MON_TRA, REF }] }] } }
+// FEC_DEP como texto 'YYYY-MM-DD HH:MM:SS'; montos como numero (null -> 0); textos sin espacios.
+// Orden: FEC_DEP y NUM_DEP; lineas por NUM_DOC.
+//
+const getSyncRecibosPendientes = async (req, res) => {
+  try {
+    const handheld = String((req.mobile.handheld && req.mobile.handheld.HANDHELD) || "").trim();
+    const replacements = { handheld, rutas: req.mobile.codigosRuta.length ? req.mobile.codigosRuta : [""] };
+    const pendientes = `ISNULL(E.DOC_PRO, 'N') = 'N' AND E.HandHeld = :handheld`;
+
+    const [encabezados, lineas] = await Promise.all([
+      sequelize.query(
+        `SELECT LTRIM(RTRIM(E.NUM_DEP)) AS NUM_DEP, LTRIM(RTRIM(E.COD_CIA)) AS COD_CIA,
+                LTRIM(RTRIM(E.COD_BCO)) AS COD_BCO, LTRIM(RTRIM(E.CTA_BCO)) AS CTA_BCO,
+                LTRIM(RTRIM(C.NOM_CTA)) AS NOM_CTA, ISNULL(E.MON_DEP, 0) AS MON_DEP,
+                CONVERT(varchar(19), E.FEC_DEP, 120) AS FEC_DEP, LTRIM(RTRIM(E.IND_MON)) AS IND_MON,
+                LTRIM(RTRIM(E.NOTAS)) AS NOTAS, ISNULL(LTRIM(RTRIM(E.DOC_PRO)), 'N') AS DOC_PRO, E.CONSEC_DEP
+           FROM COAGRO2.erpadmin.alCXC_ENC_DEP E
+           LEFT JOIN COAGRO2.erpadmin.alCXC_CTA_BCO C
+             ON C.COD_CIA = E.COD_CIA AND C.COD_BCO = E.COD_BCO AND C.CTA_BCO = E.CTA_BCO
+          WHERE ${pendientes}
+          ORDER BY E.FEC_DEP, E.NUM_DEP`,
+        { replacements, type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT LTRIM(RTRIM(D.NUM_DEP)) AS _DEP, LTRIM(RTRIM(D.CTA_BCO)) AS _CTA,
+                LTRIM(RTRIM(D.NUM_DOC)) AS NUM_DOC,
+                LTRIM(RTRIM(P.COD_TIP_DC)) AS COD_TIP_DC, LTRIM(RTRIM(P.CLASE_DOCUMENTO)) AS CLASE_DOCUMENTO,
+                LTRIM(RTRIM(COALESCE(P.COD_CLT, F.COD_CLT))) AS COD_CLT, LTRIM(RTRIM(CL.NOM_CLT)) AS NOM_CLT,
+                LTRIM(RTRIM(COALESCE(P.COD_ZON, F.COD_ZON))) AS COD_ZON,
+                ISNULL(D.MON_EFE, 0) AS MON_EFE, ISNULL(D.MON_CHE, 0) AS MON_CHE,
+                ISNULL(D.MON_DEP, 0) AS MON_DEP, ISNULL(D.MON_TRA, 0) AS MON_TRA,
+                LTRIM(RTRIM(D.REF)) AS REF
+           FROM COAGRO2.erpadmin.alCXC_DET_DEP D
+           JOIN COAGRO2.erpadmin.alCXC_ENC_DEP E ON E.NUM_DEP = D.NUM_DEP AND E.CTA_BCO = D.CTA_BCO
+           OUTER APPLY (SELECT TOP 1 PC.COD_CLT, PC.COD_ZON, PC.COD_TIP_DC, PC.CLASE_DOCUMENTO
+                          FROM COAGRO2.erpadmin.alCXC_PEN_COB PC
+                         WHERE PC.NUM_DOC = D.NUM_DOC
+                         ORDER BY CASE WHEN PC.COD_CIA = E.COD_CIA THEN 0 ELSE 1 END,
+                                  CASE WHEN PC.COD_ZON IN (:rutas) THEN 0 ELSE 1 END, PC.COD_ZON) P
+           -- Respaldo solo si ya no esta en PEN_COB (documento cancelado).
+           OUTER APPLY (SELECT TOP 1 HF.COD_CLT, HF.COD_ZON
+                          FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC HF
+                         WHERE P.COD_CLT IS NULL AND HF.NUM_FAC = D.NUM_DOC
+                         ORDER BY CASE WHEN HF.COD_CIA = E.COD_CIA THEN 0 ELSE 1 END,
+                                  CASE WHEN HF.COD_ZON IN (:rutas) THEN 0 ELSE 1 END, HF.COD_ZON) F
+           LEFT JOIN COAGRO2.erpadmin.cliente CL ON CL.COD_CLT = COALESCE(P.COD_CLT, F.COD_CLT)
+          WHERE ${pendientes}
+          ORDER BY D.NUM_DEP, D.NUM_DOC`,
+        { replacements, type: QueryTypes.SELECT }
+      ),
+    ]);
+
+    const lineasPorRecibo = new Map();
+    for (const { _DEP, _CTA, ...l } of lineas) {
+      const k = `${_DEP}|${_CTA}`;
+      if (!lineasPorRecibo.has(k)) lineasPorRecibo.set(k, []);
+      lineasPorRecibo.get(k).push(l);
+    }
+    const recibos = encabezados.map((e) => ({
+      ...e,
+      lineas: lineasPorRecibo.get(`${e.NUM_DEP}|${e.CTA_BCO}`) || [],
+    }));
+
+    res.send({
+      result: { recibos },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de recibos"],
+    });
+  }
+};
+
+//
+// GET /fr/sync/descuentos   (header Authorization: Bearer <token movil>)
+// Descuentos por cliente y articulo de TODOS los clientes de las rutas de la handheld, para
+// aplicarlos sin conexion en pedidos y cotizaciones.
+//
+// Tablas:
+//   - erpadmin.RUTA_CLIENTE      -> clientes de las rutas de la handheld
+//   - erpadmin.ARTICULO          -> solo articulos de los grupos (GRP_ART) de esas rutas
+//   - erpadmin.DESCUENTO_CLIART  -> los descuentos (CRUD web en /fr/descuentoCliart)
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     descuentos: [{ COMPANIA, CLIENTE, ARTICULO, CANT_MIN, CANT_MAX, FECHA_INICIO, FECHA_FIN,
+//                    TIPO, MONTO }]                                    -> DESCUENTO_CLIART
+//   }
+// }
+//
+// Notas:
+//  - Solo vigentes o futuros (FECHA_FIN >= hoy); la app decide por fecha del documento.
+//  - FECHA_INICIO / FECHA_FIN salen como texto 'YYYY-MM-DD' (sin hora ni zona horaria).
+//  - TIPO: 'P' porcentaje (MONTO 0-100) o 'F' monto fijo. Aplica si CANT_MIN <= cantidad <= CANT_MAX.
+//  - La app debe reemplazar toda su tabla con lo recibido (lo borrado en la web ya no viene).
+
+const getSyncDescuentos = async (req, res) => {
+  try {
+    const asignaciones = await rutaClienteModel.findAll({
+      attributes: ["CLIENTE"],
+      where: { RUTA: req.mobile.codigosRuta },
+      raw: true,
+    });
+    const codigos = [...new Set(asignaciones.map((a) => String(a.CLIENTE).trim()))];
+    const grupos = [...new Set(req.mobile.rutas.map((r) => String(r.GRUPO_ARTICULO).trim()))];
+
+    const descuentos = await porLotes(codigos, (lote) =>
+      sequelize.query(
+        `SELECT LTRIM(RTRIM(D.COMPANIA)) AS COMPANIA, LTRIM(RTRIM(D.CLIENTE)) AS CLIENTE,
+                LTRIM(RTRIM(D.ARTICULO)) AS ARTICULO, D.CANT_MIN, D.CANT_MAX,
+                CONVERT(varchar(10), D.FECHA_INICIO, 23) AS FECHA_INICIO,
+                CONVERT(varchar(10), D.FECHA_FIN, 23) AS FECHA_FIN,
+                D.TIPO, CAST(D.MONTO AS float) AS MONTO
+           FROM COAGRO2.erpadmin.DESCUENTO_CLIART D
+          WHERE D.CLIENTE IN (:lote)
+            AND D.FECHA_FIN >= CAST(GETDATE() AS date)
+            AND D.ARTICULO IN (SELECT COD_ART FROM COAGRO2.erpadmin.ARTICULO WHERE GRP_ART IN (:grupos))`,
+        { replacements: { lote, grupos }, type: QueryTypes.SELECT }
+      )
+    );
+    // El orden se aplica aqui porque los lotes llegan por separado.
+    descuentos.sort(
+      (a, b) =>
+        a.CLIENTE.localeCompare(b.CLIENTE) ||
+        a.ARTICULO.localeCompare(b.ARTICULO) ||
+        a.CANT_MIN - b.CANT_MIN ||
+        a.FECHA_INICIO.localeCompare(b.FECHA_INICIO)
+    );
+
+    res.send({
+      result: { descuentos },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de descuentos"],
+    });
+  }
+};
+
+//
+// Promociones de temporada (web: /fr/promocion). Tres endpoints, uno por tabla, que la app une
+// por PROMOCION_ID:
+//
+// GET /fr/sync/promociones            -> erpadmin.FR_PROMOCION          (encabezado)
+// GET /fr/sync/promocionesProductos   -> erpadmin.FR_PROMOCION_PRODUCTO (a que productos aplica)
+// GET /fr/sync/promocionesDestinos    -> erpadmin.FR_PROMOCION_DESTINO  (a quien va dirigida)
+//   (header Authorization: Bearer <token movil>)
+//
+// Los tres mandan SOLO las promociones que le sirven a la handheld (PROMOS_DE_LA_HANDHELD):
+//  - ACTIVA = 'S' y FECHA_FIN >= hoy (vigentes o futuras; la app revisa FECHA_INICIO).
+//  - DESTINO T (todos) o K (tipo de cliente: la app lo compara con COD_TIP_CL de clientesCia).
+//  - DESTINO R: alguna de sus rutas es de la handheld.
+//  - DESTINO C: alguno de sus clientes esta en RUTA_CLIENTE de las rutas de la handheld.
+//
+// Respuestas (result):
+//   promociones: [{ ID, TITULO, DESCRIPCION, TIPO, FECHA_INICIO, FECHA_FIN, DESTINO,
+//                   ARTICULO_BONIFICADO, CANTIDAD_BONIFICADA, ACTIVA, FECHA_MODIFICACION }]
+//   productos:   [{ ID, PROMOCION_ID, ALCANCE, VALOR, CANTIDAD_MIN, DESCUENTO, PRECIO_ESPECIAL }]
+//   destinos:    [{ PROMOCION_ID, TIPO, VALOR }]
+//
+// Notas:
+//  - TIPO de promocion: D descuento (DESCUENTO %), P precio especial (PRECIO_ESPECIAL),
+//    B bonificacion (ARTICULO_BONIFICADO + CANTIDAD_BONIFICADA al llegar a CANTIDAD_MIN).
+//  - ALCANCE de producto: A codigo de articulo, L linea (CLASIFICACION3 de /fr/sync/articulos),
+//    T texto contenido en DES_ART (sin distinguir mayusculas).
+//  - Fechas como texto 'YYYY-MM-DD'; FECHA_MODIFICACION 'YYYY-MM-DD HH:mm:ss'.
+//  - En destinos solo van las rutas de la handheld (R) y los clientes de sus rutas (C); los K completos.
+//  - Regla de precio igual que la web (utils/precioFr.js): gana el precio mas bajo, los
+//    descuentos no se suman; las bonificaciones van aparte.
+//  - La app debe reemplazar las tres tablas completas en cada sincronizacion.
+
+const CLIENTES_DE_MIS_RUTAS = `SELECT CLIENTE FROM COAGRO2.erpadmin.RUTA_CLIENTE WHERE RUTA IN (:rutas)`;
+
+const PROMOS_DE_LA_HANDHELD = `
+  SELECT P.ID
+    FROM COAGRO2.erpadmin.FR_PROMOCION P
+   WHERE P.ACTIVA = 'S'
+     AND P.FECHA_FIN >= CAST(GETDATE() AS date)
+     AND (P.DESTINO IN ('T', 'K')
+          OR (P.DESTINO = 'R' AND EXISTS (
+                SELECT 1 FROM COAGRO2.erpadmin.FR_PROMOCION_DESTINO X
+                 WHERE X.PROMOCION_ID = P.ID AND X.TIPO = 'R' AND X.VALOR IN (:rutas)))
+          OR (P.DESTINO = 'C' AND EXISTS (
+                SELECT 1 FROM COAGRO2.erpadmin.FR_PROMOCION_DESTINO X
+                 WHERE X.PROMOCION_ID = P.ID AND X.TIPO = 'C'
+                   AND X.VALOR IN (${CLIENTES_DE_MIS_RUTAS}))))`;
+
+// Arma el handler de una de las tablas de promociones: misma forma de respuesta y de error.
+const syncPromocion = (clave, nombre, sql) => async (req, res) => {
+  try {
+    const filas = await sequelize.query(sql, {
+      replacements: { rutas: req.mobile.codigosRuta },
+      type: QueryTypes.SELECT,
+    });
+    res.send({ result: { [clave]: filas }, success: true, errors: [] });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: [`Error al preparar la sincronizacion de ${nombre}`],
+    });
+  }
+};
+
+const getSyncPromociones = syncPromocion(
+  "promociones",
+  "promociones",
+  `SELECT P.ID, P.TITULO, P.DESCRIPCION, P.TIPO,
+          CONVERT(varchar(10), P.FECHA_INICIO, 23) AS FECHA_INICIO,
+          CONVERT(varchar(10), P.FECHA_FIN, 23) AS FECHA_FIN,
+          P.DESTINO, LTRIM(RTRIM(P.ARTICULO_BONIFICADO)) AS ARTICULO_BONIFICADO,
+          P.CANTIDAD_BONIFICADA, P.ACTIVA,
+          CONVERT(varchar(19), COALESCE(P.FECHA_MODIFICACION, P.FECHA_CREACION), 120) AS FECHA_MODIFICACION
+     FROM COAGRO2.erpadmin.FR_PROMOCION P
+    WHERE P.ID IN (${PROMOS_DE_LA_HANDHELD})
+    ORDER BY P.FECHA_INICIO, P.ID`
+);
+
+const getSyncPromocionesProductos = syncPromocion(
+  "productos",
+  "productos de promociones",
+  `SELECT PP.ID, PP.PROMOCION_ID, PP.ALCANCE, LTRIM(RTRIM(PP.VALOR)) AS VALOR, PP.CANTIDAD_MIN,
+          CAST(PP.DESCUENTO AS float) AS DESCUENTO, CAST(PP.PRECIO_ESPECIAL AS float) AS PRECIO_ESPECIAL
+     FROM COAGRO2.erpadmin.FR_PROMOCION_PRODUCTO PP
+    WHERE PP.PROMOCION_ID IN (${PROMOS_DE_LA_HANDHELD})
+    ORDER BY PP.PROMOCION_ID, PP.ID`
+);
+
+const getSyncPromocionesDestinos = syncPromocion(
+  "destinos",
+  "destinos de promociones",
+  `SELECT D.PROMOCION_ID, D.TIPO, LTRIM(RTRIM(D.VALOR)) AS VALOR
+     FROM COAGRO2.erpadmin.FR_PROMOCION_DESTINO D
+    WHERE D.PROMOCION_ID IN (${PROMOS_DE_LA_HANDHELD})
+      AND (D.TIPO = 'K'
+           OR (D.TIPO = 'R' AND D.VALOR IN (:rutas))
+           OR (D.TIPO = 'C' AND D.VALOR IN (${CLIENTES_DE_MIS_RUTAS})))
+    ORDER BY D.PROMOCION_ID, D.TIPO, D.VALOR`
+);
+
+//
+// GET /fr/sync/promocionales   (header Authorization: Bearer <token movil>)
+// Solicitudes de material promocional de las RUTAS de la handheld (como los demas sync), subidas
+// con POST /fr/sync/enviar -> promocionales, para que la app muestre su estado: todas las
+// pendientes (DOC_PRO 'N') y las procesadas en los ultimos 30 dias.
+//
+// Tabla: erpadmin.PROMOCIONALES_RT (+ erpadmin.cliente para NOM_CLT).
+//
+// Respuesta:
+// { result: { promocionales: [{ ID, CLIENTE, RUTA, NOM_CLT, AGENTE, NOTAS, FECHA_SOLICITUD,
+//                               FECHA_REQUERIDA, DOC_PRO, FECHA_PROCESADO, FECHA_ENVIO }] } }
+// Todas las fechas como texto local 'YYYY-MM-DD HH:MM:SS' (FECHA_REQUERIDA a medianoche;
+// FECHA_ENVIO = cuando llego al servidor, columna FECHA_CREACION). Orden: FECHA_SOLICITUD desc.
+// La app une con lo suyo por
+// CLIENTE + FECHA_SOLICITUD y debe reemplazar las ya enviadas con lo recibido (lo procesado hace
+// mas de 30 dias ya no viene).
+
+const getSyncPromocionales = async (req, res) => {
+  try {
+    const promocionales = await sequelize.query(
+      `SELECT P.ID, LTRIM(RTRIM(P.CLIENTE)) AS CLIENTE, LTRIM(RTRIM(P.RUTA)) AS RUTA,
+              LTRIM(RTRIM(C.NOM_CLT)) AS NOM_CLT, LTRIM(RTRIM(P.AGENTE)) AS AGENTE, P.NOTAS,
+              CONVERT(varchar(19), P.FECHA_SOLICITUD, 120) AS FECHA_SOLICITUD,
+              CONVERT(varchar(19), CAST(P.FECHA_REQUERIDA AS datetime), 120) AS FECHA_REQUERIDA,
+              P.DOC_PRO, CONVERT(varchar(19), P.FECHA_PROCESADO, 120) AS FECHA_PROCESADO,
+              CONVERT(varchar(19), P.FECHA_CREACION, 120) AS FECHA_ENVIO
+         FROM COAGRO2.erpadmin.PROMOCIONALES_RT P
+         OUTER APPLY (SELECT TOP 1 NOM_CLT FROM COAGRO2.erpadmin.cliente WHERE COD_CLT = P.CLIENTE) C
+        WHERE P.RUTA IN (:rutas)
+          AND (P.DOC_PRO = 'N' OR P.FECHA_PROCESADO >= DATEADD(day, -30, GETDATE()))
+        ORDER BY P.FECHA_SOLICITUD DESC, P.ID DESC`,
+      { replacements: { rutas: req.mobile.codigosRuta }, type: QueryTypes.SELECT }
+    );
+    res.send({ result: { promocionales }, success: true, errors: [] });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de promocionales"],
+    });
+  }
+};
+
+//
+// GET /fr/sync/metas[?anio=2026&mes=11]   (header Authorization: Bearer <token movil>)
+// Metas de venta por articulo SOLO del agente de la handheld del token: RUTA_ASIGNADA_RT.AGENTE
+// (codigo de ruteo) se traduce con AGENTE_ASOC_RT.CODIGO -> AGENTE, que es
+// MetaVentaProducto.Vendedor. El agente no viaja en la URL, asi un
+// vendedor nunca puede pedir las metas de otro.
+//
+// Tabla: CINCOH.MetaVentaProducto (+ LineaNegocio, Lider, ProveedorMeta, ARTICULO para nombres).
+// Excepcion a "la movil solo lee erpadmin": las metas se cargan por Excel directo en CINCOH y no
+// tienen copia en erpadmin.
+//
+// Sin anio/mes manda el periodo actual (fecha del servidor). Con solo anio, todo ese anio.
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     agentes:    ["AG01"],   (codigos de ruteo)
+//     vendedores: ["VBV"],    (vendedores del ERP)
+//     periodo: { anio: 2026, mes: 11 },
+//     metas:   [{ ID_META, ANIO, MES, VENDEDOR, COD_LINEA, LINEA, COD_LIDER, LIDER, COD_ART,
+//                 DES_ART, COD_PROVEEDOR, PROVEEDOR, META_UNIDADES, MINIMO, INCENTIVO,
+//                 VENTA_UNIDADES, VENTA_VALOR, FECHA_MODIFICACION }]          -> META_VENTA
+//   }
+// }
+//
+// La app debe borrar las metas del periodo recibido y volver a insertar: la carga por Excel
+// REEMPLAZA el periodo completo y los IdMeta cambian en cada re-subida.
+
+const entero = (valor) => (/^\d+$/.test(String(valor ?? "").trim()) ? Number(valor) : null);
+
+const getSyncMetas = async (req, res) => {
+  try {
+    const agentes = [
+      ...new Set(req.mobile.rutas.map((r) => String(r.AGENTE ?? "").trim()).filter(Boolean)),
+    ];
+    if (!agentes.length) {
+      return res.send({
+        result: {},
+        success: false,
+        errors: [`La handheld ${req.mobile.handheld.HANDHELD} no tiene un agente asignado`],
+      });
+    }
+
+    const hoy = new Date();
+    const tieneAnio = req.query.anio !== undefined && req.query.anio !== "";
+    const tieneMes = req.query.mes !== undefined && req.query.mes !== "";
+    const anio = tieneAnio ? entero(req.query.anio) : hoy.getFullYear();
+    const mes = tieneMes ? entero(req.query.mes) : tieneAnio ? null : hoy.getMonth() + 1;
+    if (anio === null || anio < 2000 || anio > 2100) {
+      return res.send({ result: {}, success: false, errors: ["anio debe ser un numero entre 2000 y 2100"] });
+    }
+    if (tieneMes && (mes === null || mes < 1 || mes > 12)) {
+      return res.send({ result: {}, success: false, errors: ["mes debe ser un numero entre 1 y 12"] });
+    }
+
+    // RUTA_ASIGNADA_RT.AGENTE es el CODIGO de ruteo (AGENTE_ASOC_RT.CODIGO), que puede ser un
+    // alias distinto al vendedor del ERP (ej. AG01 -> VBV). La meta se guarda con el del ERP.
+    const asociados = await sequelize.query(
+      `SELECT DISTINCT LTRIM(RTRIM(AGENTE)) AS AGENTE
+         FROM COAGRO2.erpadmin.AGENTE_ASOC_RT
+        WHERE CODIGO IN (:agentes)`,
+      { replacements: { agentes }, type: QueryTypes.SELECT }
+    );
+    const vendedores = asociados.map((a) => a.AGENTE).filter(Boolean);
+    if (!vendedores.length) {
+      return res.send({
+        result: {},
+        success: false,
+        errors: [`El agente ${agentes.join(", ")} no esta asociado a un vendedor del ERP (AGENTE_ASOC_RT)`],
+      });
+    }
+
+    const metas = await sequelize.query(
+      `SELECT M.IdMeta AS ID_META, M.Anio AS ANIO, M.Mes AS MES,
+              LTRIM(RTRIM(M.Vendedor)) AS VENDEDOR,
+              LTRIM(RTRIM(L.codigo)) AS COD_LINEA, L.nombre AS LINEA,
+              LTRIM(RTRIM(LI.codigo)) AS COD_LIDER, LI.nombre AS LIDER,
+              LTRIM(RTRIM(M.Articulo)) AS COD_ART, A.DESCRIPCION AS DES_ART,
+              LTRIM(RTRIM(P.codigo)) AS COD_PROVEEDOR, P.nombre AS PROVEEDOR,
+              M.Meta_Unidades AS META_UNIDADES, CAST(M.minimo AS decimal(18, 2)) AS MINIMO,
+              CAST(M.Incentivo AS float) AS INCENTIVO,
+              M.Venta_Unidades AS VENTA_UNIDADES, M.Venta_Valor AS VENTA_VALOR,
+              CONVERT(varchar(19), COALESCE(M.FechaModificacion, M.FechaCreacion), 120) AS FECHA_MODIFICACION
+         FROM COAGRO2.CINCOH.MetaVentaProducto M
+         LEFT JOIN COAGRO2.CINCOH.LineaNegocio L ON L.id = M.IdLineaNegocio
+         LEFT JOIN COAGRO2.CINCOH.Lider LI ON LI.id = M.IdLider
+         LEFT JOIN COAGRO2.CINCOH.ProveedorMeta P ON P.id = M.IdProveedor
+         LEFT JOIN COAGRO2.CINCOH.ARTICULO A ON A.ARTICULO = M.Articulo
+        WHERE M.Vendedor IN (:vendedores) AND M.Anio = :anio
+          ${mes ? "AND M.Mes = :mes" : ""}
+        ORDER BY M.Anio, M.Mes, M.Vendedor, L.codigo, M.Articulo`,
+      { replacements: { vendedores, anio, mes }, type: QueryTypes.SELECT }
+    );
+
+    res.send({
+      result: { agentes, vendedores, periodo: { anio, mes }, metas },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de metas"],
+    });
+  }
+};
+
 module.exports = {
+  getSyncPromocionales,
+  getSyncPromociones,
+  getSyncPromocionesProductos,
+  getSyncPromocionesDestinos,
+  getSyncDescuentos,
+  getSyncMetas,
+  getSyncRecibosPendientes,
+  getSyncCuentasBanco,
   getSyncLotes,
   getSyncHistorialPedidos,
   getSyncHistorialFacturas,

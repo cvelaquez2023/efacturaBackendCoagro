@@ -9,7 +9,12 @@
 //   - alFAC_ENC_PED      <- pedidos[].encabezado (llave COD_CIA + COD_ZON + NUM_PED)
 //   - alFAC_DET_PED      <- pedidos[].lineas     (se unen al encabezado por COD_CIA + NUM_PED)
 //   - alFAC_ENC_PED/DET  <- aprobaciones  (cotizacion ya enviada: TIP_DOC 'C' -> 'F')
+//   - alCXC_ENC_DEP      <- depositos[].encabezado (llave COD_CIA + COD_BCO + CTA_BCO + NUM_DEP)
+//   - alCXC_DET_DEP      <- depositos[].lineas     (se unen al encabezado por NUM_DEP + CTA_BCO)
 //   - RUTA_CONSECUT_RT   <- consecutivos  (PEDIDO y/o FACTURA de la ruta, solo si avanzan)
+//   - PROMOCIONALES_RT   <- promocionales (llave HANDHELD + CLIENTE + FECHA_SOLICITUD; ver procesarPromocional)
+//   - cliente / CLIENTE_CIA / RUTA_CLIENTE <- cambiosCliente (datos del cliente editados en la app;
+//                                             ver procesarCambioCliente y CAMPOS_CAMBIO_CLIENTE)
 //
 // Request (cualquier arreglo puede venir vacio u omitirse):
 // {
@@ -18,7 +23,14 @@
 //                   ubicacion: { LATITUD, LONGITUD, ALTITUD, TIEMPO_GPS, TIEMPO_PDA } | null }],
 //   pedidos:     [{ encabezado: { COD_CIA, COD_ZON, COD_CLT, NUM_PED, ... }, lineas: [{ NUM_LN, COD_ART, ... }] }],
 //   aprobaciones: [{ COD_CIA, COD_ZON, NUM_PED, FEC_PED, FEC_DES? }],   // cotizaciones que el vendedor aprobo
-//   consecutivos: [{ RUTA, PEDIDO?, FACTURA? }]   // siguiente pedido / cotizacion de la ruta, ya incrementado por la app
+//   depositos:   [{ encabezado: { COD_CIA, COD_BCO, CTA_BCO, NUM_DEP, MON_DEP, FEC_DEP, IND_MON, NOTAS?, DOC_PRO? },
+//                   lineas: [{ NUM_DOC, MON_CHE?, MON_EFE?, MON_DEP?, MON_TRA?, REF? }] }],
+//                   (una linea por documento; REF = texto plano de los cheques)
+//   promocionales: [{ RUTA, CLIENTE, NOTAS, FECHA_REQUERIDA: 'YYYY-MM-DD[ HH:MM:SS]',
+//                     FECHA_SOLICITUD: 'YYYY-MM-DD HH:MM:SS', COMPANIA? }]   // solicitud de material promocional
+//   consecutivos: [{ RUTA, PEDIDO?, FACTURA?, RECIBO? }]   // siguiente pedido / cotizacion / recibo de la ruta, ya incrementado por la app
+//   cambiosCliente: [{ COD_CLT, COD_CIA?, RUTA?, TABLA?, CAMPO, VALOR, VALOR_ANTERIOR?, FECHA? }]
+//                   // ultimo valor de cada dato del cliente editado en Consultar > Cliente
 // }
 // Fechas como texto 'YYYY-MM-DD HH:MM:SS' en hora local; se guardan tal cual (sin zona horaria).
 //
@@ -30,13 +42,17 @@
 //     visitas:      [{ CLIENTE, RUTA, INICIO, ok, duplicado?, error? }],
 //     pedidos:      [{ COD_ZON, NUM_PED, ok, duplicado?, conflicto?, error? }],
 //     aprobaciones: [{ COD_ZON, NUM_PED, ok, duplicado?, error? }],   // siempre viene (aunque sea [])
-//     consecutivos: [{ RUTA, PEDIDO, FACTURA?, ok, ignorado?, actual?, ignoradoFactura?, actualFactura?, error? }]
+//     depositos:    [{ CTA_BCO, NUM_DEP, ok, CONSEC_DEP?, duplicado?, conflicto?, error? }],
+//     promocionales: [{ CLIENTE, FECHA_SOLICITUD, ok, ID?, duplicado?, error? }],
+//     consecutivos: [{ RUTA, PEDIDO, FACTURA?, ok, ignorado?, actual?, ignoradoFactura?, actualFactura?, error? }],
+//     cambiosCliente: [{ COD_CLT, CAMPO, ok, error? }]   // uno por fila recibida, en el mismo orden
 //   }
 // }
 // success: false solo si el request entero es invalido (formato); el token lo valida mobileSession (401).
 //
 // Notas:
-//  - Se procesa en orden: ubicaciones, visitas, pedidos, aprobaciones, consecutivos. Cada registro es
+//  - Se procesa en orden: ubicaciones, visitas, pedidos, aprobaciones, depositos, promocionales, consecutivos,
+//    cambiosCliente. Cada registro es
 //    independiente: uno con error no impide guardar los demas.
 //  - No duplica: una visita que ya existe responde ok con duplicado: true y NO se sobrescribe (el
 //    celular puede reenviar lo mismo si se corto la respuesta).
@@ -62,6 +78,16 @@
 //    ok: false. Si el actual esta vacio o no termina en numero, se guarda tal cual. Asi
 //    GET /fr/sync/consecutivos lo devuelve en la siguiente carga. FACTURA (consecutivo de cotizaciones)
 //    sigue la misma regla contra RUTA_CONSECUT_RT.FACTURA; su resultado va en ignoradoFactura/actualFactura.
+//    RECIBO (recibos de cobro; es el NUM_DEP de los depositos) igual, en ignoradoRecibo/actualRecibo.
+//  - Deposito: cada deposito es un RECIBO de cobro de la app; NUM_DEP es el numero del recibo
+//    (RUTA_CONSECUT_RT.RECIBO de la ruta, texto: RERT_<ruta>_<correlativo>, p. ej. RERT_01_00001).
+//    La boleta / transferencia van en REF.
+//    CONSEC_DEP es IDENTITY: lo pone SQL Server y se devuelve en la respuesta. HandHeld sale del
+//    token, no del body. NUM_DEP y CTA_BCO de las lineas salen del encabezado. Encabezado + lineas
+//    van en una transaccion. Si ya existe COD_CIA + COD_BCO + CTA_BCO + NUM_DEP es un reenvio (ok,
+//    duplicado: true, no se sobrescribe). Si CTA_BCO + NUM_DEP existe con otra compania o banco es
+//    conflicto (alCXC_DET_DEP solo distingue por NUM_DEP + CTA_BCO). IND_MON: 'L' local, 'D' dolar.
+//    COD_CIA + COD_BCO + CTA_BCO debe existir en alCXC_CTA_BCO (la app las baja de GET /fr/sync/cuentasBanco).
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
@@ -85,6 +111,28 @@ const COLUMNAS_DET = [
   "MON_PRC_MN", "POR_DSC_AP", "ART_BON", "PORC_IMPUESTO1", "PORC_IMPUESTO2", "PORCENTAJE_IMP1",
   "PORCENTAJE_IMP2", "PORC_EXONERACION", "MONTO_EXONERACION", "ES_CANASTA_BASICA", "ES_OTRO_CARGO",
 ];
+
+// Encabezado y lineas de alCXC_ENC_DEP / alCXC_DET_DEP que se aceptan de la app.
+const COLUMNAS_ENC_DEP = ["MON_DEP", "FEC_DEP", "IND_MON", "NOTAS", "DOC_PRO"];
+// MON_DEP (deposito del cliente) y MON_TRA (transferencia) son columnas nuevas de alCXC_DET_DEP:
+// deben existir en SQL Server antes de publicar este cambio.
+const COLUMNAS_DET_DEP = ["MON_CHE", "MON_EFE", "MON_DEP", "MON_TRA", "REF"];
+const MONTOS_DET_DEP = ["MON_CHE", "MON_EFE", "MON_DEP", "MON_TRA"];
+const MONEDAS_DEP = ["L", "D"];
+// Largos de las columnas de texto (INFORMATION_SCHEMA de erpadmin.alCXC_ENC_DEP / alCXC_DET_DEP).
+const LARGOS_ENC_DEP = { COD_CIA: 10, COD_BCO: 10, CTA_BCO: 20, NUM_DEP: 30, NOTAS: 80, HandHeld: 30 };
+// NUM_DOC se amplio de 20 a 50: los documentos son numeros de DTE (DTE-03-M001P001-26-000000000009776 = 34).
+const LARGOS_DET_DEP = { NUM_DOC: 50, REF: 80 };
+// Mensaje si algun valor no cabe en su columna; null si todo cabe.
+const excedeLargo = (largos, valores) => {
+  for (const [columna, max] of Object.entries(largos)) {
+    const v = texto(valores[columna]);
+    if (v.length > max) return `${columna} "${v}" tiene ${v.length} caracteres y la columna permite ${max}`;
+  }
+  return null;
+};
+// NUM_DEP = numero de recibo de la app: letras, digitos, '_' o '-' y termina en el correlativo (max 30).
+const FORMATO_NUM_DEP = /^[A-Za-z0-9_-]{0,29}\d$/;
 
 const texto = (v) => (v === undefined || v === null ? "" : String(v).trim());
 
@@ -357,6 +405,102 @@ const procesarAprobacion = async (contexto, a) => {
   }
 };
 
+const esMonto = (v) => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
+
+const procesarDeposito = async (contexto, d) => {
+  const enc = (d && d.encabezado) || {};
+  const lineas = Array.isArray(d && d.lineas) ? d.lineas : [];
+  const COD_CIA = texto(enc.COD_CIA);
+  const COD_BCO = texto(enc.COD_BCO);
+  const CTA_BCO = texto(enc.CTA_BCO);
+  const NUM_DEP = texto(enc.NUM_DEP);
+  const salida = { CTA_BCO, NUM_DEP };
+
+  for (const [c, v] of Object.entries({ COD_CIA, COD_BCO, CTA_BCO, NUM_DEP })) {
+    if (!v) return { ...salida, ok: false, error: `El campo ${c} es obligatorio` };
+  }
+  if (!contexto.cuentasBanco.has(`${COD_CIA}|${COD_BCO}|${CTA_BCO}`)) {
+    return { ...salida, ok: false, error: `La cuenta ${CTA_BCO} del banco ${COD_BCO} (compania ${COD_CIA}) no existe` };
+  }
+  if (!FORMATO_NUM_DEP.test(NUM_DEP)) {
+    return { ...salida, ok: false, error: "NUM_DEP debe ser el numero de recibo (p. ej. RERT_01_00001)" };
+  }
+  if (!esMonto(enc.MON_DEP)) return { ...salida, ok: false, error: "MON_DEP debe ser un monto" };
+  if (!texto(enc.FEC_DEP)) return { ...salida, ok: false, error: "El campo FEC_DEP es obligatorio" };
+  if (fechaInvalida(enc, ["FEC_DEP"])) return { ...salida, ok: false, error: "FEC_DEP debe tener formato YYYY-MM-DD HH:MM:SS" };
+  if (!MONEDAS_DEP.includes(texto(enc.IND_MON))) {
+    return { ...salida, ok: false, error: `IND_MON debe ser ${MONEDAS_DEP.join(" o ")}` };
+  }
+  // Largos de las columnas: se avisa cual no cabe (SQL Server solo dice "would be truncated").
+  const largoEnc = excedeLargo(LARGOS_ENC_DEP, { COD_CIA, COD_BCO, CTA_BCO, NUM_DEP, NOTAS: enc.NOTAS, HandHeld: contexto.handheld });
+  if (largoEnc) return { ...salida, ok: false, error: largoEnc };
+  const docs = new Set();
+  for (const l of lineas) {
+    const NUM_DOC = texto(l && l.NUM_DOC);
+    if (!NUM_DOC) return { ...salida, ok: false, error: "Cada linea debe traer NUM_DOC" };
+    if (docs.has(NUM_DOC)) return { ...salida, ok: false, error: `El documento ${NUM_DOC} viene repetido en el deposito` };
+    docs.add(NUM_DOC);
+    const largoDet = excedeLargo(LARGOS_DET_DEP, { NUM_DOC, REF: l.REF });
+    if (largoDet) return { ...salida, ok: false, error: largoDet };
+    const malMonto = MONTOS_DET_DEP.find((c) => l[c] !== undefined && l[c] !== null && !esMonto(l[c]));
+    if (malMonto) return { ...salida, ok: false, error: `${malMonto} del documento ${NUM_DOC} debe ser un monto` };
+  }
+
+  try {
+    let duplicado = false;
+    let conflicto = null;
+    let CONSEC_DEP = null;
+    await sequelize.transaction(async (transaction) => {
+      // HOLDLOCK: la PK incluye CONSEC_DEP (IDENTITY), asi que la BD no impide el duplicado.
+      const [existe] = await sequelize.query(
+        `SELECT TOP 1 COD_CIA, COD_BCO, CONSEC_DEP FROM COAGRO2.erpadmin.alCXC_ENC_DEP WITH (UPDLOCK, HOLDLOCK)
+          WHERE CTA_BCO = :CTA_BCO AND NUM_DEP = :NUM_DEP`,
+        { replacements: { CTA_BCO, NUM_DEP }, type: QueryTypes.SELECT, transaction }
+      );
+      if (existe) {
+        if (texto(existe.COD_CIA) === COD_CIA && texto(existe.COD_BCO) === COD_BCO) {
+          duplicado = true;
+          CONSEC_DEP = existe.CONSEC_DEP;
+        } else {
+          conflicto =
+            `El deposito ${NUM_DEP} de la cuenta ${CTA_BCO} ya existe ` +
+            `(compania ${texto(existe.COD_CIA)}, banco ${texto(existe.COD_BCO)})`;
+        }
+        return;
+      }
+
+      const valores = {
+        ...tomarColumnas(enc, COLUMNAS_ENC_DEP),
+        COD_CIA, COD_BCO, CTA_BCO, NUM_DEP,
+        HandHeld: contexto.handheld,
+      };
+      const columnas = Object.keys(valores);
+      const params = columnas.map((c) => (c === "FEC_DEP" ? `CONVERT(datetime, :${c}, 120)` : `:${c}`));
+      const [insertado] = await sequelize.query(
+        `INSERT INTO COAGRO2.erpadmin.alCXC_ENC_DEP (${columnas.join(", ")})
+         OUTPUT INSERTED.CONSEC_DEP
+         VALUES (${params.join(", ")})`,
+        { replacements: valores, type: QueryTypes.SELECT, transaction }
+      );
+      CONSEC_DEP = insertado && insertado.CONSEC_DEP;
+
+      for (const l of lineas) {
+        await insertar(
+          "alCXC_DET_DEP",
+          { ...tomarColumnas(l, COLUMNAS_DET_DEP), NUM_DOC: texto(l.NUM_DOC), NUM_DEP, CTA_BCO },
+          [],
+          transaction
+        );
+      }
+    });
+    if (conflicto) return { ...salida, ok: false, conflicto: true, error: conflicto };
+    return { ...salida, ok: true, CONSEC_DEP, duplicado };
+  } catch (e) {
+    console.log(e);
+    return { ...salida, ok: false, error: mensajeError(e) };
+  }
+};
+
 // Separa prefijo y parte numerica igual que la app ('RP10001' -> RP, 10001n). null si no termina en numero.
 const partirConsecutivo = (valor) => {
   const m = /^(.*?)(\d+)$/.exec(valor);
@@ -382,17 +526,19 @@ const procesarConsecutivo = async (contexto, c) => {
   const RUTA = texto(c.RUTA);
   const PEDIDO = texto(c.PEDIDO);
   const FACTURA = texto(c.FACTURA);
+  const RECIBO = texto(c.RECIBO);
   const salida = { RUTA, PEDIDO };
   if (FACTURA) salida.FACTURA = FACTURA;
-  if (!RUTA || (!PEDIDO && !FACTURA)) {
-    return { ...salida, ok: false, error: "RUTA y PEDIDO o FACTURA son obligatorios" };
+  if (RECIBO) salida.RECIBO = RECIBO;
+  if (!RUTA || (!PEDIDO && !FACTURA && !RECIBO)) {
+    return { ...salida, ok: false, error: "RUTA y PEDIDO, FACTURA o RECIBO son obligatorios" };
   }
   if (!contexto.rutas.has(RUTA)) return { ...salida, ok: false, error: `La ruta ${RUTA} no pertenece a esta handheld` };
 
   try {
     return await sequelize.transaction(async (transaction) => {
       const [fila] = await sequelize.query(
-        `SELECT PEDIDO, FACTURA FROM COAGRO2.erpadmin.RUTA_CONSECUT_RT WITH (UPDLOCK) WHERE RUTA = :RUTA`,
+        `SELECT PEDIDO, FACTURA, RECIBO FROM COAGRO2.erpadmin.RUTA_CONSECUT_RT WITH (UPDLOCK) WHERE RUTA = :RUTA`,
         { replacements: { RUTA }, type: QueryTypes.SELECT, transaction }
       );
       if (!fila) return { ...salida, ok: false, error: `La ruta ${RUTA} no tiene consecutivos configurados` };
@@ -402,6 +548,7 @@ const procesarConsecutivo = async (contexto, c) => {
       const campos = [
         { columna: "PEDIDO", valor: PEDIDO, ignorado: "ignorado", actual: "actual" },
         { columna: "FACTURA", valor: FACTURA, ignorado: "ignoradoFactura", actual: "actualFactura" },
+        { columna: "RECIBO", valor: RECIBO, ignorado: "ignoradoRecibo", actual: "actualRecibo" },
       ];
       for (const campo of campos) {
         if (!campo.valor) continue;
@@ -419,7 +566,7 @@ const procesarConsecutivo = async (contexto, c) => {
       if (sets.length) {
         await sequelize.query(
           `UPDATE COAGRO2.erpadmin.RUTA_CONSECUT_RT SET ${sets.join(", ")} WHERE RUTA = :RUTA`,
-          { replacements: { RUTA, PEDIDO, FACTURA }, transaction }
+          { replacements: { RUTA, PEDIDO, FACTURA, RECIBO }, transaction }
         );
       }
       return respuesta;
@@ -430,13 +577,256 @@ const procesarConsecutivo = async (contexto, c) => {
   }
 };
 
+// Solicitud de material promocional (texto libre). Llave HANDHELD + CLIENTE + FECHA_SOLICITUD (como
+// VISITA con INICIO): si ya existe es un reenvio (ok, duplicado: true, no se sobrescribe). La app
+// fija FECHA_SOLICITUD al crear la solicitud y no la cambia al reenviar. AGENTE sale de la ruta
+// (RUTA_ASIGNADA_RT de la handheld) y NOM_CLT de erpadmin.cliente al consultar: los que manda la
+// app se ignoran. DOC_PRO siempre entra 'N'.
+const LARGOS_PROMOCIONAL = { NOTAS: 500, COMPANIA: 10 };
+const procesarPromocional = async (contexto, p) => {
+  const RUTA = texto(p.RUTA);
+  const CLIENTE = texto(p.CLIENTE);
+  const FECHA_SOLICITUD = texto(p.FECHA_SOLICITUD);
+  const salida = { CLIENTE, FECHA_SOLICITUD };
+  const error = validarRutaCliente(contexto, RUTA, CLIENTE);
+  if (error) return { ...salida, ok: false, error };
+  if (!texto(p.NOTAS)) return { ...salida, ok: false, error: "NOTAS es obligatorio" };
+  // La app la manda a medianoche ('YYYY-MM-DD 00:00:00'); la columna es date: se toma solo el dia.
+  const requerida = texto(p.FECHA_REQUERIDA);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(requerida) && !FECHA_REGEX.test(requerida)) {
+    return { ...salida, ok: false, error: "FECHA_REQUERIDA debe tener formato YYYY-MM-DD o YYYY-MM-DD HH:MM:SS" };
+  }
+  if (!FECHA_REGEX.test(FECHA_SOLICITUD)) {
+    return { ...salida, ok: false, error: "FECHA_SOLICITUD debe tener formato YYYY-MM-DD HH:MM:SS" };
+  }
+  const largo = excedeLargo(LARGOS_PROMOCIONAL, p);
+  if (largo) return { ...salida, ok: false, error: largo };
+
+  try {
+    const replacements = {
+      HANDHELD: contexto.handheld,
+      RUTA,
+      CLIENTE,
+      AGENTE: contexto.agenteDeRuta.get(RUTA) || null,
+      COMPANIA: texto(p.COMPANIA) || null,
+      NOTAS: texto(p.NOTAS),
+      FECHA_REQUERIDA: requerida.slice(0, 10),
+      FECHA_SOLICITUD,
+    };
+    // Un solo statement; si dos envios llegan a la vez, el UNIQUE de la llave evita el doble.
+    const llave = `HANDHELD = :HANDHELD AND CLIENTE = :CLIENTE AND FECHA_SOLICITUD = CONVERT(datetime, :FECHA_SOLICITUD, 120)`;
+    const [fila] = await sequelize.query(
+      `IF EXISTS (SELECT 1 FROM COAGRO2.erpadmin.PROMOCIONALES_RT WHERE ${llave})
+         SELECT ID, CAST(1 AS bit) AS DUPLICADO FROM COAGRO2.erpadmin.PROMOCIONALES_RT WHERE ${llave}
+       ELSE
+         INSERT INTO COAGRO2.erpadmin.PROMOCIONALES_RT
+                (HANDHELD, RUTA, CLIENTE, AGENTE, COMPANIA, NOTAS, FECHA_REQUERIDA, FECHA_SOLICITUD)
+         OUTPUT INSERTED.ID, CAST(0 AS bit) AS DUPLICADO
+         VALUES (:HANDHELD, :RUTA, :CLIENTE, :AGENTE, :COMPANIA, :NOTAS,
+                 CONVERT(date, :FECHA_REQUERIDA, 23), CONVERT(datetime, :FECHA_SOLICITUD, 120))`,
+      { replacements, type: QueryTypes.SELECT }
+    );
+    return { ...salida, ok: true, ID: fila.ID, duplicado: !!fila.DUPLICADO };
+  } catch (e) {
+    console.log(e);
+    return { ...salida, ok: false, error: mensajeError(e) };
+  }
+};
+
+// Cambios a datos del cliente hechos en la app (Consultar > Cliente). Cada fila trae el ULTIMO valor
+// de un dato; se escribe en la MISMA tabla y columna de la que GET /fr/sync/clientes lo lee, asi la
+// siguiente carga ya trae el valor nuevo. Es un UPDATE al mismo valor: reenviar es seguro.
+//  - COD_CLT es el codigo de la handheld = erpadmin.cliente.COD_CLT = RUTA_CLIENTE.CLIENTE (igual que
+//    en /fr/sync/clientes). Debe estar asignado a alguna ruta de la handheld.
+//  - El backend decide la tabla segun CAMPO (TABLA de la app es informativa). La columna sale SIEMPRE
+//    de CAMPOS_CAMBIO_CLIENTE, nunca del texto recibido. Cualquier otro CAMPO: "Campo no editable".
+//  - Campos de erpadmin.cliente: se actualizan TODAS las filas del cliente (una por COD_ZON).
+//  - Campos de CLIENTE_CIA: la fila de COD_CIA si viene; si no, la misma que manda /fr/sync/clientes
+//    (CINCOH primero). Si el cliente no tiene fila en CLIENTE_CIA: ok false (no se crea).
+//  - NIVEL_PRECIO debe existir en NIVEL_LISTA. NO se toca LST_PRE: en NIVEL_LISTA todos los niveles
+//    tienen LISTA 1, mientras los clientes usan LST_PRE 8; copiarla cambiaria sus precios.
+//  - DIAS_VISITA (RUTA_CLIENTE): un cliente solo tiene UN dia por ruta (misma regla que el CRUD
+//    /fr/rutaCliente), asi que VALOR debe traer un solo dia. Si es el mismo que ya tiene, no se toca
+//    (conserva su ORDEN); si es otro, se mueve a ese dia al final: ORDEN = MAX(ORDEN) + 1 de la ruta y dia.
+//  - Divisiones geograficas (CLIENTE_CIA): DIVISION_GEOGRAFICA1 (departamento), DIVISION_GEOGRAFICA2
+//    (municipio) y DIVISION_GEOGRAFICA3 (distrito, columna division_geografica3) son texto libre que
+//    escribe el vendedor: no se validan contra catalogos. Largo maximo 12, 12 y 50. "" -> NULL.
+//  - Textos que no caben en la columna: ok false (no se recortan). VALOR_ANTERIOR y FECHA no se usan.
+const textoLibre = (largo, vacio) => ({ tipo: "texto", largo, vacio });
+const numero = (min, max, entero = false) => ({ tipo: "numero", min, max, entero });
+const CAMPOS_CAMBIO_CLIENTE = {
+  // erpadmin.cliente
+  NOM_CLT: { tabla: "cliente", columna: "NOM_CLT", ...textoLibre(150, "requerido") },
+  DIR_CLT: { tabla: "cliente", columna: "DIR_CLT", ...textoLibre(null, "vacio") },
+  NIVEL_PRECIO: {
+    tabla: "cliente", columna: "NIVEL_PRECIO", tipo: "catalogo", largo: 150, nombre: "nivel de precio",
+    existe: `SELECT 1 AS OK FROM COAGRO2.erpadmin.NIVEL_LISTA WHERE NIVEL_PRECIO = :valor`,
+  },
+  // erpadmin.CLIENTE_CIA
+  NOM_CTO: { tabla: "cia", columna: "NOM_CTO", ...textoLibre(30, "vacio") },
+  NUM_TEL: { tabla: "cia", columna: "NUM_TEL", ...textoLibre(50, "vacio") },
+  codActividad: { tabla: "cia", columna: "codActividad", ...textoLibre(50, "null") },
+  desActividad: { tabla: "cia", columna: "desActividad", ...textoLibre(350, "null") },
+  nomEncargadoCompras: { tabla: "cia", columna: "nomEncargadoCompras", ...textoLibre(40, "null") },
+  telEncargadoCompras: { tabla: "cia", columna: "telEncargadoCompras", ...textoLibre(40, "null") },
+  nomEncargadoPagos: { tabla: "cia", columna: "nomEncargadoPagos", ...textoLibre(40, "null") },
+  telEncargadoPagos: { tabla: "cia", columna: "telEncargadoPagos", ...textoLibre(40, "null") },
+  COD_TIP_CL: {
+    tabla: "cia", columna: "COD_TIP_CL", tipo: "catalogo", largo: 8, nombre: "tipo de cliente",
+    existe: `SELECT 1 AS OK FROM COAGRO2.erpadmin.alFAC_TIP_CLT WHERE COD_TIP_CL = :valor`,
+  },
+  DIA_CRE: { tabla: "cia", columna: "DIA_CRE", ...numero(0, 99999, true) },
+  LIM_CRE: { tabla: "cia", columna: "LIM_CRE", ...numero(0, 1e12) },
+  POR_EXC_VT: { tabla: "cia", columna: "POR_EXC_VT", ...numero(0, 100) },
+  POR_EXC_CS: { tabla: "cia", columna: "POR_EXC_CS", ...numero(0, 100) },
+  DESCUENTO: { tabla: "cia", columna: "DESCUENTO", ...numero(0, 100) },
+  IND_MON: { tabla: "cia", columna: "IND_MON", tipo: "opcion", opciones: ["L", "D"] },
+  // Divisiones geograficas: 1 = departamento, 2 = municipio, 3 = distrito. Texto libre que escribe
+  // el vendedor (no se valida contra catalogos), al largo de su columna. "" -> NULL.
+  DIVISION_GEOGRAFICA1: { tabla: "cia", columna: "DIVISION_GEOGRAFICA1", ...textoLibre(12, "null") },
+  DIVISION_GEOGRAFICA2: { tabla: "cia", columna: "DIVISION_GEOGRAFICA2", ...textoLibre(12, "null") },
+  DIVISION_GEOGRAFICA3: { tabla: "cia", columna: "division_geografica3", ...textoLibre(50, "null") },
+  // erpadmin.RUTA_CLIENTE
+  DIAS_VISITA: { tabla: "ruta", tipo: "dias" },
+};
+
+// Valida y convierte VALOR segun el campo. Devuelve { valor } o { error }.
+const valorCambioCliente = async (CAMPO, def, VALOR) => {
+  if (def.tipo === "numero") {
+    const n = typeof VALOR === "string" && VALOR.trim() !== "" ? Number(VALOR.trim()) : VALOR;
+    if (typeof n !== "number" || !Number.isFinite(n)) return { error: `${CAMPO} debe ser un numero` };
+    if (def.entero && !Number.isInteger(n)) return { error: `${CAMPO} debe ser un numero entero` };
+    if (n < def.min || n > def.max) return { error: `${CAMPO} debe estar entre ${def.min} y ${def.max}` };
+    return { valor: n };
+  }
+  if (VALOR !== null && VALOR !== undefined && typeof VALOR === "object") {
+    return { error: `${CAMPO} debe ser texto` };
+  }
+  const t = texto(VALOR);
+  if (def.tipo === "opcion") {
+    if (!def.opciones.includes(t)) return { error: `${CAMPO} debe ser ${def.opciones.join(" o ")}` };
+    return { valor: t };
+  }
+  if (def.largo && t.length > def.largo) {
+    return { error: `${CAMPO} supera el largo permitido (${def.largo} caracteres)` };
+  }
+  if (def.tipo === "catalogo") {
+    if (!t) return { error: `${CAMPO} es obligatorio` };
+    const [fila] = await sequelize.query(def.existe, { replacements: { valor: t }, type: QueryTypes.SELECT });
+    if (!fila) return { error: `El ${def.nombre} ${t} no existe` };
+    return { valor: t };
+  }
+  // Texto libre: "" -> error si es requerido, NULL o "" segun la columna.
+  if (!t) {
+    if (def.vacio === "requerido") return { error: `${CAMPO} es obligatorio` };
+    return { valor: def.vacio === "null" ? null : "" };
+  }
+  return { valor: t };
+};
+
+// DIAS_VISITA: deja al cliente en UN dia de la ruta. Mismo dia que ya tiene -> no toca nada.
+const cambiarDiaVisita = async (contexto, COD_CLT, c) => {
+  const RUTA = texto(c.RUTA);
+  const error = validarRutaCliente(contexto, RUTA, COD_CLT);
+  if (error) return error;
+  if (c.VALOR === null || c.VALOR === undefined || c.VALOR === "") return "DIAS_VISITA debe traer un dia";
+  const dias = [...new Set((Array.isArray(c.VALOR) ? c.VALOR : [c.VALOR]).map(Number))];
+  if (!dias.length) return "DIAS_VISITA debe traer un dia";
+  if (dias.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) {
+    return "DIAS_VISITA: cada dia debe ser un entero entre 1 (lunes) y 7 (domingo)";
+  }
+  if (dias.length > 1) return "Un cliente solo puede tener un dia de visita por ruta";
+  const replacements = { RUTA, COD_CLT, DIA: dias[0] };
+
+  await sequelize.transaction(async (transaction) => {
+    const actuales = await sequelize.query(
+      `SELECT DIA FROM COAGRO2.erpadmin.RUTA_CLIENTE WITH (UPDLOCK, HOLDLOCK)
+        WHERE RUTA = :RUTA AND CLIENTE = :COD_CLT`,
+      { replacements, type: QueryTypes.SELECT, transaction }
+    );
+    if (actuales.length === 1 && Number(actuales[0].DIA) === replacements.DIA) return;
+    await sequelize.query(
+      `DELETE FROM COAGRO2.erpadmin.RUTA_CLIENTE WHERE RUTA = :RUTA AND CLIENTE = :COD_CLT AND DIA <> :DIA`,
+      { replacements, transaction }
+    );
+    await sequelize.query(
+      `IF NOT EXISTS (SELECT 1 FROM COAGRO2.erpadmin.RUTA_CLIENTE
+                       WHERE RUTA = :RUTA AND CLIENTE = :COD_CLT AND DIA = :DIA)
+         INSERT INTO COAGRO2.erpadmin.RUTA_CLIENTE (RUTA, CLIENTE, DIA, ORDEN)
+         SELECT :RUTA, :COD_CLT, :DIA, ISNULL(MAX(ORDEN), 0) + 1
+           FROM COAGRO2.erpadmin.RUTA_CLIENTE WITH (UPDLOCK, HOLDLOCK)
+          WHERE RUTA = :RUTA AND DIA = :DIA`,
+      { replacements, transaction }
+    );
+  });
+  return null;
+};
+
+const procesarCambioCliente = async (contexto, c) => {
+  const COD_CLT = texto(c.COD_CLT);
+  const CAMPO = texto(c.CAMPO);
+  const salida = { COD_CLT, CAMPO };
+  const falla = (error) => ({ ...salida, ok: false, error });
+
+  if (!COD_CLT) return falla("COD_CLT es obligatorio");
+  const def = Object.prototype.hasOwnProperty.call(CAMPOS_CAMBIO_CLIENTE, CAMPO) ? CAMPOS_CAMBIO_CLIENTE[CAMPO] : null;
+  if (!def) return falla(`Campo no editable: ${CAMPO}`);
+  if (!contexto.clientesDeLaHandheld.has(COD_CLT)) {
+    return falla(`El cliente ${COD_CLT} no esta asignado a ninguna ruta de esta handheld`);
+  }
+
+  try {
+    if (def.tipo === "dias") {
+      const error = await cambiarDiaVisita(contexto, COD_CLT, c);
+      return error ? falla(error) : { ...salida, ok: true };
+    }
+
+    if (def.tabla === "cliente") {
+      const v = await valorCambioCliente(CAMPO, def, c.VALOR);
+      if (v.error) return falla(v.error);
+      // Todas las filas del cliente (una por COD_ZON).
+      const [fila] = await sequelize.query(
+        `UPDATE COAGRO2.erpadmin.cliente SET ${def.columna} = :valor WHERE COD_CLT = :COD_CLT;
+         SELECT @@ROWCOUNT AS N;`,
+        { replacements: { valor: v.valor, COD_CLT }, type: QueryTypes.SELECT }
+      );
+      if (!fila || !fila.N) return falla(`El cliente ${COD_CLT} no existe en erpadmin.cliente`);
+      return { ...salida, ok: true };
+    }
+
+    // CLIENTE_CIA: la fila de COD_CIA si viene; si no, la misma que manda /fr/sync/clientes.
+    const COD_CIA = texto(c.COD_CIA);
+    const [cia] = await sequelize.query(
+      `SELECT TOP 1 COD_CIA FROM COAGRO2.erpadmin.CLIENTE_CIA
+        WHERE COD_CLT = :COD_CLT AND (:COD_CIA = '' OR COD_CIA = :COD_CIA)
+        ORDER BY CASE WHEN COD_CIA = 'CINCOH' THEN 0 ELSE 1 END, COD_CIA`,
+      { replacements: { COD_CLT, COD_CIA }, type: QueryTypes.SELECT }
+    );
+    if (!cia) {
+      return falla(
+        `El cliente ${COD_CLT} no tiene datos ${COD_CIA ? `de la compania ${COD_CIA} ` : "de compania "}(CLIENTE_CIA)`
+      );
+    }
+    const v = await valorCambioCliente(CAMPO, def, c.VALOR);
+    if (v.error) return falla(v.error);
+    await sequelize.query(
+      `UPDATE COAGRO2.erpadmin.CLIENTE_CIA SET ${def.columna} = :valor WHERE COD_CLT = :COD_CLT AND COD_CIA = :COD_CIA`,
+      { replacements: { valor: v.valor, COD_CLT, COD_CIA: cia.COD_CIA } }
+    );
+    return { ...salida, ok: true };
+  } catch (e) {
+    console.log(e);
+    return falla(mensajeError(e));
+  }
+};
+
 const postSyncEnviar = async (req, res) => {
   try {
     const body = req.body;
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return res.send({ result: {}, success: false, errors: ["El cuerpo debe ser un objeto JSON"] });
     }
-    for (const k of ["ubicaciones", "visitas", "pedidos", "aprobaciones", "consecutivos"]) {
+    for (const k of ["ubicaciones", "visitas", "pedidos", "aprobaciones", "depositos", "promocionales", "consecutivos", "cambiosCliente"]) {
       if (body[k] !== undefined && body[k] !== null && !Array.isArray(body[k])) {
         return res.send({ result: {}, success: false, errors: [`${k} debe ser un arreglo`] });
       }
@@ -445,7 +835,10 @@ const postSyncEnviar = async (req, res) => {
     const visitas = body.visitas || [];
     const pedidos = body.pedidos || [];
     const aprobaciones = body.aprobaciones || [];
+    const depositos = body.depositos || [];
+    const promocionales = body.promocionales || [];
     const consecutivos = body.consecutivos || [];
+    const cambiosCliente = body.cambiosCliente || [];
 
     // Contexto para validar: rutas de la handheld, sus clientes y los articulos de los pedidos.
     const asignaciones = await sequelize.query(
@@ -463,19 +856,41 @@ const postSyncEnviar = async (req, res) => {
         type: QueryTypes.SELECT,
       })
     );
+    const cuentasBanco = depositos.length
+      ? await sequelize.query(`SELECT COD_CIA, COD_BCO, CTA_BCO FROM COAGRO2.erpadmin.alCXC_CTA_BCO`, {
+          type: QueryTypes.SELECT,
+        })
+      : [];
     const contexto = {
+      cuentasBanco: new Set(cuentasBanco.map((c) => `${texto(c.COD_CIA)}|${texto(c.COD_BCO)}|${texto(c.CTA_BCO)}`)),
       rutas: new Set(req.mobile.codigosRuta),
       asignaciones: new Set(asignaciones.map((a) => `${texto(a.RUTA)}|${texto(a.CLIENTE)}`)),
+      clientesDeLaHandheld: new Set(asignaciones.map((a) => texto(a.CLIENTE))),
       articulos: new Set(articulos.map((a) => texto(a.COD_ART))),
+      handheld: texto(req.mobile.handheld && req.mobile.handheld.HANDHELD),
+      agenteDeRuta: new Map(req.mobile.rutas.map((r) => [texto(r.RUTA), texto(r.AGENTE)])),
     };
 
-    // Orden: ubicaciones, visitas, pedidos, aprobaciones, consecutivos.
-    const result = { ubicaciones: [], visitas: [], pedidos: [], aprobaciones: [], consecutivos: [] };
+    // Orden: ubicaciones, visitas, pedidos, aprobaciones, depositos, promocionales, consecutivos,
+    // cambiosCliente.
+    const result = {
+      ubicaciones: [],
+      visitas: [],
+      pedidos: [],
+      aprobaciones: [],
+      depositos: [],
+      promocionales: [],
+      consecutivos: [],
+      cambiosCliente: [],
+    };
     for (const u of ubicaciones) result.ubicaciones.push(await procesarUbicacion(contexto, u || {}));
     for (const v of visitas) result.visitas.push(await procesarVisita(contexto, v || {}));
     for (const p of pedidos) result.pedidos.push(await procesarPedido(contexto, p || {}));
     for (const a of aprobaciones) result.aprobaciones.push(await procesarAprobacion(contexto, a || {}));
+    for (const d of depositos) result.depositos.push(await procesarDeposito(contexto, d || {}));
+    for (const p of promocionales) result.promocionales.push(await procesarPromocional(contexto, p || {}));
     for (const c of consecutivos) result.consecutivos.push(await procesarConsecutivo(contexto, c || {}));
+    for (const c of cambiosCliente) result.cambiosCliente.push(await procesarCambioCliente(contexto, c || {}));
 
     res.send({ result, success: true, errors: [] });
   } catch (error) {
