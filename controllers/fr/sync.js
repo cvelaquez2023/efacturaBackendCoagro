@@ -1648,6 +1648,50 @@ const getSyncPromocionesDestinos = syncPromocion(
 );
 
 //
+// GET /fr/sync/promocionales   (header Authorization: Bearer <token movil>)
+// Solicitudes de material promocional de las RUTAS de la handheld (como los demas sync), subidas
+// con POST /fr/sync/enviar -> promocionales, para que la app muestre su estado: todas las
+// pendientes (DOC_PRO 'N') y las procesadas en los ultimos 30 dias.
+//
+// Tabla: erpadmin.PROMOCIONALES_RT (+ erpadmin.cliente para NOM_CLT).
+//
+// Respuesta:
+// { result: { promocionales: [{ ID, CLIENTE, RUTA, NOM_CLT, AGENTE, NOTAS, FECHA_SOLICITUD,
+//                               FECHA_REQUERIDA, DOC_PRO, FECHA_PROCESADO, FECHA_ENVIO }] } }
+// Todas las fechas como texto local 'YYYY-MM-DD HH:MM:SS' (FECHA_REQUERIDA a medianoche;
+// FECHA_ENVIO = cuando llego al servidor, columna FECHA_CREACION). Orden: FECHA_SOLICITUD desc.
+// La app une con lo suyo por
+// CLIENTE + FECHA_SOLICITUD y debe reemplazar las ya enviadas con lo recibido (lo procesado hace
+// mas de 30 dias ya no viene).
+
+const getSyncPromocionales = async (req, res) => {
+  try {
+    const promocionales = await sequelize.query(
+      `SELECT P.ID, LTRIM(RTRIM(P.CLIENTE)) AS CLIENTE, LTRIM(RTRIM(P.RUTA)) AS RUTA,
+              LTRIM(RTRIM(C.NOM_CLT)) AS NOM_CLT, LTRIM(RTRIM(P.AGENTE)) AS AGENTE, P.NOTAS,
+              CONVERT(varchar(19), P.FECHA_SOLICITUD, 120) AS FECHA_SOLICITUD,
+              CONVERT(varchar(19), CAST(P.FECHA_REQUERIDA AS datetime), 120) AS FECHA_REQUERIDA,
+              P.DOC_PRO, CONVERT(varchar(19), P.FECHA_PROCESADO, 120) AS FECHA_PROCESADO,
+              CONVERT(varchar(19), P.FECHA_CREACION, 120) AS FECHA_ENVIO
+         FROM COAGRO2.erpadmin.PROMOCIONALES_RT P
+         OUTER APPLY (SELECT TOP 1 NOM_CLT FROM COAGRO2.erpadmin.cliente WHERE COD_CLT = P.CLIENTE) C
+        WHERE P.RUTA IN (:rutas)
+          AND (P.DOC_PRO = 'N' OR P.FECHA_PROCESADO >= DATEADD(day, -30, GETDATE()))
+        ORDER BY P.FECHA_SOLICITUD DESC, P.ID DESC`,
+      { replacements: { rutas: req.mobile.codigosRuta }, type: QueryTypes.SELECT }
+    );
+    res.send({ result: { promocionales }, success: true, errors: [] });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de promocionales"],
+    });
+  }
+};
+
+//
 // GET /fr/sync/metas[?anio=2026&mes=11]   (header Authorization: Bearer <token movil>)
 // Metas de venta por articulo SOLO del agente de la handheld del token: RUTA_ASIGNADA_RT.AGENTE
 // (codigo de ruteo) se traduce con AGENTE_ASOC_RT.CODIGO -> AGENTE, que es
@@ -1759,6 +1803,7 @@ const getSyncMetas = async (req, res) => {
 };
 
 module.exports = {
+  getSyncPromocionales,
   getSyncPromociones,
   getSyncPromocionesProductos,
   getSyncPromocionesDestinos,

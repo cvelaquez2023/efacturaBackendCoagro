@@ -51,6 +51,7 @@ router.use("/descuentoCliart", require("./descuentoCliart"));
 router.use("/descuentoNivel", require("./descuentoNivel"));
 router.use("/bonificacionCliart", require("./bonificacionCliart"));
 router.use("/bonificacionNivel", require("./bonificacionNivel"));
+router.use("/promocional", require("./promocional"));
 
 
 module.exports = router;

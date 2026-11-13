@@ -12,6 +12,7 @@
 //   - alCXC_ENC_DEP      <- depositos[].encabezado (llave COD_CIA + COD_BCO + CTA_BCO + NUM_DEP)
 //   - alCXC_DET_DEP      <- depositos[].lineas     (se unen al encabezado por NUM_DEP + CTA_BCO)
 //   - RUTA_CONSECUT_RT   <- consecutivos  (PEDIDO y/o FACTURA de la ruta, solo si avanzan)
+//   - PROMOCIONALES_RT   <- promocionales (llave HANDHELD + CLIENTE + FECHA_SOLICITUD; ver procesarPromocional)
 //
 // Request (cualquier arreglo puede venir vacio u omitirse):
 // {
@@ -23,6 +24,8 @@
 //   depositos:   [{ encabezado: { COD_CIA, COD_BCO, CTA_BCO, NUM_DEP, MON_DEP, FEC_DEP, IND_MON, NOTAS?, DOC_PRO? },
 //                   lineas: [{ NUM_DOC, MON_CHE?, MON_EFE?, MON_DEP?, MON_TRA?, REF? }] }],
 //                   (una linea por documento; REF = texto plano de los cheques)
+//   promocionales: [{ RUTA, CLIENTE, NOTAS, FECHA_REQUERIDA: 'YYYY-MM-DD[ HH:MM:SS]',
+//                     FECHA_SOLICITUD: 'YYYY-MM-DD HH:MM:SS', COMPANIA? }]   // solicitud de material promocional
 //   consecutivos: [{ RUTA, PEDIDO?, FACTURA?, RECIBO? }]   // siguiente pedido / cotizacion / recibo de la ruta, ya incrementado por la app
 // }
 // Fechas como texto 'YYYY-MM-DD HH:MM:SS' en hora local; se guardan tal cual (sin zona horaria).
@@ -36,13 +39,14 @@
 //     pedidos:      [{ COD_ZON, NUM_PED, ok, duplicado?, conflicto?, error? }],
 //     aprobaciones: [{ COD_ZON, NUM_PED, ok, duplicado?, error? }],   // siempre viene (aunque sea [])
 //     depositos:    [{ CTA_BCO, NUM_DEP, ok, CONSEC_DEP?, duplicado?, conflicto?, error? }],
+//     promocionales: [{ CLIENTE, FECHA_SOLICITUD, ok, ID?, duplicado?, error? }],
 //     consecutivos: [{ RUTA, PEDIDO, FACTURA?, ok, ignorado?, actual?, ignoradoFactura?, actualFactura?, error? }]
 //   }
 // }
 // success: false solo si el request entero es invalido (formato); el token lo valida mobileSession (401).
 //
 // Notas:
-//  - Se procesa en orden: ubicaciones, visitas, pedidos, aprobaciones, depositos, consecutivos. Cada registro es
+//  - Se procesa en orden: ubicaciones, visitas, pedidos, aprobaciones, depositos, promocionales, consecutivos. Cada registro es
 //    independiente: uno con error no impide guardar los demas.
 //  - No duplica: una visita que ya existe responde ok con duplicado: true y NO se sobrescribe (el
 //    celular puede reenviar lo mismo si se corto la respuesta).
@@ -567,13 +571,69 @@ const procesarConsecutivo = async (contexto, c) => {
   }
 };
 
+// Solicitud de material promocional (texto libre). Llave HANDHELD + CLIENTE + FECHA_SOLICITUD (como
+// VISITA con INICIO): si ya existe es un reenvio (ok, duplicado: true, no se sobrescribe). La app
+// fija FECHA_SOLICITUD al crear la solicitud y no la cambia al reenviar. AGENTE sale de la ruta
+// (RUTA_ASIGNADA_RT de la handheld) y NOM_CLT de erpadmin.cliente al consultar: los que manda la
+// app se ignoran. DOC_PRO siempre entra 'N'.
+const LARGOS_PROMOCIONAL = { NOTAS: 500, COMPANIA: 10 };
+const procesarPromocional = async (contexto, p) => {
+  const RUTA = texto(p.RUTA);
+  const CLIENTE = texto(p.CLIENTE);
+  const FECHA_SOLICITUD = texto(p.FECHA_SOLICITUD);
+  const salida = { CLIENTE, FECHA_SOLICITUD };
+  const error = validarRutaCliente(contexto, RUTA, CLIENTE);
+  if (error) return { ...salida, ok: false, error };
+  if (!texto(p.NOTAS)) return { ...salida, ok: false, error: "NOTAS es obligatorio" };
+  // La app la manda a medianoche ('YYYY-MM-DD 00:00:00'); la columna es date: se toma solo el dia.
+  const requerida = texto(p.FECHA_REQUERIDA);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(requerida) && !FECHA_REGEX.test(requerida)) {
+    return { ...salida, ok: false, error: "FECHA_REQUERIDA debe tener formato YYYY-MM-DD o YYYY-MM-DD HH:MM:SS" };
+  }
+  if (!FECHA_REGEX.test(FECHA_SOLICITUD)) {
+    return { ...salida, ok: false, error: "FECHA_SOLICITUD debe tener formato YYYY-MM-DD HH:MM:SS" };
+  }
+  const largo = excedeLargo(LARGOS_PROMOCIONAL, p);
+  if (largo) return { ...salida, ok: false, error: largo };
+
+  try {
+    const replacements = {
+      HANDHELD: contexto.handheld,
+      RUTA,
+      CLIENTE,
+      AGENTE: contexto.agenteDeRuta.get(RUTA) || null,
+      COMPANIA: texto(p.COMPANIA) || null,
+      NOTAS: texto(p.NOTAS),
+      FECHA_REQUERIDA: requerida.slice(0, 10),
+      FECHA_SOLICITUD,
+    };
+    // Un solo statement; si dos envios llegan a la vez, el UNIQUE de la llave evita el doble.
+    const llave = `HANDHELD = :HANDHELD AND CLIENTE = :CLIENTE AND FECHA_SOLICITUD = CONVERT(datetime, :FECHA_SOLICITUD, 120)`;
+    const [fila] = await sequelize.query(
+      `IF EXISTS (SELECT 1 FROM COAGRO2.erpadmin.PROMOCIONALES_RT WHERE ${llave})
+         SELECT ID, CAST(1 AS bit) AS DUPLICADO FROM COAGRO2.erpadmin.PROMOCIONALES_RT WHERE ${llave}
+       ELSE
+         INSERT INTO COAGRO2.erpadmin.PROMOCIONALES_RT
+                (HANDHELD, RUTA, CLIENTE, AGENTE, COMPANIA, NOTAS, FECHA_REQUERIDA, FECHA_SOLICITUD)
+         OUTPUT INSERTED.ID, CAST(0 AS bit) AS DUPLICADO
+         VALUES (:HANDHELD, :RUTA, :CLIENTE, :AGENTE, :COMPANIA, :NOTAS,
+                 CONVERT(date, :FECHA_REQUERIDA, 23), CONVERT(datetime, :FECHA_SOLICITUD, 120))`,
+      { replacements, type: QueryTypes.SELECT }
+    );
+    return { ...salida, ok: true, ID: fila.ID, duplicado: !!fila.DUPLICADO };
+  } catch (e) {
+    console.log(e);
+    return { ...salida, ok: false, error: mensajeError(e) };
+  }
+};
+
 const postSyncEnviar = async (req, res) => {
   try {
     const body = req.body;
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return res.send({ result: {}, success: false, errors: ["El cuerpo debe ser un objeto JSON"] });
     }
-    for (const k of ["ubicaciones", "visitas", "pedidos", "aprobaciones", "depositos", "consecutivos"]) {
+    for (const k of ["ubicaciones", "visitas", "pedidos", "aprobaciones", "depositos", "promocionales", "consecutivos"]) {
       if (body[k] !== undefined && body[k] !== null && !Array.isArray(body[k])) {
         return res.send({ result: {}, success: false, errors: [`${k} debe ser un arreglo`] });
       }
@@ -583,6 +643,7 @@ const postSyncEnviar = async (req, res) => {
     const pedidos = body.pedidos || [];
     const aprobaciones = body.aprobaciones || [];
     const depositos = body.depositos || [];
+    const promocionales = body.promocionales || [];
     const consecutivos = body.consecutivos || [];
 
     // Contexto para validar: rutas de la handheld, sus clientes y los articulos de los pedidos.
@@ -612,15 +673,25 @@ const postSyncEnviar = async (req, res) => {
       asignaciones: new Set(asignaciones.map((a) => `${texto(a.RUTA)}|${texto(a.CLIENTE)}`)),
       articulos: new Set(articulos.map((a) => texto(a.COD_ART))),
       handheld: texto(req.mobile.handheld && req.mobile.handheld.HANDHELD),
+      agenteDeRuta: new Map(req.mobile.rutas.map((r) => [texto(r.RUTA), texto(r.AGENTE)])),
     };
 
-    // Orden: ubicaciones, visitas, pedidos, aprobaciones, depositos, consecutivos.
-    const result = { ubicaciones: [], visitas: [], pedidos: [], aprobaciones: [], depositos: [], consecutivos: [] };
+    // Orden: ubicaciones, visitas, pedidos, aprobaciones, depositos, promocionales, consecutivos.
+    const result = {
+      ubicaciones: [],
+      visitas: [],
+      pedidos: [],
+      aprobaciones: [],
+      depositos: [],
+      promocionales: [],
+      consecutivos: [],
+    };
     for (const u of ubicaciones) result.ubicaciones.push(await procesarUbicacion(contexto, u || {}));
     for (const v of visitas) result.visitas.push(await procesarVisita(contexto, v || {}));
     for (const p of pedidos) result.pedidos.push(await procesarPedido(contexto, p || {}));
     for (const a of aprobaciones) result.aprobaciones.push(await procesarAprobacion(contexto, a || {}));
     for (const d of depositos) result.depositos.push(await procesarDeposito(contexto, d || {}));
+    for (const p of promocionales) result.promocionales.push(await procesarPromocional(contexto, p || {}));
     for (const c of consecutivos) result.consecutivos.push(await procesarConsecutivo(contexto, c || {}));
 
     res.send({ result, success: true, errors: [] });
