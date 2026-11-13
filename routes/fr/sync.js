@@ -2,7 +2,8 @@
 // (header Authorization: Bearer <token>) y rol RUTA. Las rutas salen de la
 // handheld del token (RUTA_ASIGNADA_RT), no de la URL.
 // Queda como GET /fr/sync/clientes, /clientesCia, /articulos, /lotes, /precios, /cobros, /cobrosAgente, /consecutivos, /configuracion, /cotizaciones, /historialPedidos, /historialFacturas,
-// /historialPedidosRuta, /historialFacturasRuta, /cuentasBanco, /recibosPendientes y /metas,
+// /historialPedidosRuta, /historialFacturasRuta, /cuentasBanco, /recibosPendientes, /metas, /descuentos,
+// /promociones, /promocionesProductos y /promocionesDestinos,
 // y POST /fr/sync/enviar (la handheld sube lo registrado sin conexion, incluidos depositos).
 
 const { Router } = require("express");
@@ -27,6 +28,10 @@ const {
   getSyncCuentasBanco,
   getSyncRecibosPendientes,
   getSyncMetas,
+  getSyncDescuentos,
+  getSyncPromociones,
+  getSyncPromocionesProductos,
+  getSyncPromocionesDestinos,
 } = require("../../controllers/fr/sync");
 const { postSyncEnviar } = require("../../controllers/fr/syncEnviar");
 
@@ -54,6 +59,10 @@ router.get("/historialFacturasRuta", getSyncHistorialFacturasRuta);
 router.get("/cuentasBanco", getSyncCuentasBanco);
 router.get("/recibosPendientes", getSyncRecibosPendientes);
 router.get("/metas", getSyncMetas);
+router.get("/descuentos", getSyncDescuentos);
+router.get("/promociones", getSyncPromociones);
+router.get("/promocionesProductos", getSyncPromocionesProductos);
+router.get("/promocionesDestinos", getSyncPromocionesDestinos);
 router.post("/enviar", postSyncEnviar);
 
 module.exports = router;

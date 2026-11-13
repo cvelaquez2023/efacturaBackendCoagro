@@ -38,7 +38,8 @@ const findChromePath = () => {
 };
 
 // Sin outputPath no se guarda archivo: devuelve el PDF como Buffer (page.pdf siempre lo devuelve).
-const generatePdfWithPuppeteer = async (htmlContent, outputPath) => {
+// opciones: se mezclan sobre las de page.pdf (ej. otros margenes); sin ella queda todo igual.
+const generatePdfWithPuppeteer = async (htmlContent, outputPath, opciones = {}) => {
   const chromePath = findChromePath();
   const launchOptions = { headless: "new" };
   if (chromePath) {
@@ -58,6 +59,7 @@ const generatePdfWithPuppeteer = async (htmlContent, outputPath) => {
         left: "10mm",
         right: "10mm",
       },
+      ...opciones,
     });
   } finally {
     await browser.close();

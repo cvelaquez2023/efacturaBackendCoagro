@@ -15,6 +15,8 @@
 //       Lista paginada de encabezados con NOM_CTA, cantidad de lineas y totales por forma de pago.
 //       desde/hasta: YYYY-MM-DD sobre FEC_DEP (ambos inclusive). docPro: S (aplicado) / N (pendiente,
 //       incluye null). q: NUM_DEP o NOTAS parcial.
+//   GET /fr/deposito/documentos?(mismos filtros)&numDoc=&cliente=&ruta=&page=&limit=
+//       Lista paginada por DOCUMENTO pagado (una fila por linea de DET) con su recibo y totales.
 //   GET /fr/deposito/:consecDep
 //       Encabezado + lineas (con cliente, ruta y tipo de documento de cada NUM_DOC).
 //
@@ -45,6 +47,29 @@ const SELECT_ENCABEZADO = `
                         SUM(ISNULL(D.MON_DEP, 0)) AS TOTAL_DEP, SUM(ISNULL(D.MON_TRA, 0)) AS TOTAL_TRA
                    FROM COAGRO2.erpadmin.alCXC_DET_DEP D
                   WHERE D.NUM_DEP = E.NUM_DEP AND D.CTA_BCO = E.CTA_BCO) T`;
+
+// Cliente/ruta/tipo de una linea (D): ENC/DET no los guardan; salen de NUM_DOC (PEN_COB y, si ya
+// se cancelo, HIST_FAC). OUTER APPLY TOP 1 (primero la compania `cia`) para no duplicar lineas.
+const datosDelDocumento = (cia) => `
+  OUTER APPLY (SELECT TOP 1 PC.COD_CLT, PC.COD_ZON, PC.COD_TIP_DC, PC.CLASE_DOCUMENTO
+                 FROM COAGRO2.erpadmin.alCXC_PEN_COB PC
+                WHERE PC.NUM_DOC = D.NUM_DOC
+                ORDER BY CASE WHEN PC.COD_CIA = ${cia} THEN 0 ELSE 1 END, PC.COD_ZON) P
+  OUTER APPLY (SELECT TOP 1 HF.COD_CLT, HF.COD_ZON
+                 FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC HF
+                WHERE P.COD_CLT IS NULL AND HF.NUM_FAC = D.NUM_DOC
+                ORDER BY CASE WHEN HF.COD_CIA = ${cia} THEN 0 ELSE 1 END, HF.COD_ZON) F
+  OUTER APPLY (SELECT TOP 1 NOM_CLT FROM COAGRO2.erpadmin.cliente
+                WHERE COD_CLT = COALESCE(P.COD_CLT, F.COD_CLT)) CL`;
+
+const CAMPOS_LINEA = `
+  LTRIM(RTRIM(D.NUM_DOC)) AS NUM_DOC,
+  LTRIM(RTRIM(P.COD_TIP_DC)) AS COD_TIP_DC, LTRIM(RTRIM(P.CLASE_DOCUMENTO)) AS CLASE_DOCUMENTO,
+  LTRIM(RTRIM(COALESCE(P.COD_CLT, F.COD_CLT))) AS COD_CLT, LTRIM(RTRIM(CL.NOM_CLT)) AS NOM_CLT,
+  LTRIM(RTRIM(COALESCE(P.COD_ZON, F.COD_ZON))) AS COD_ZON,
+  ISNULL(D.MON_EFE, 0) AS MON_EFE, ISNULL(D.MON_CHE, 0) AS MON_CHE,
+  ISNULL(D.MON_DEP, 0) AS MON_DEP, ISNULL(D.MON_TRA, 0) AS MON_TRA,
+  LTRIM(RTRIM(D.REF)) AS REF`;
 
 // Arma el WHERE y los replacements a partir del query string. Devuelve { error } si un filtro es invalido.
 const armarFiltros = (query) => {
@@ -150,27 +175,10 @@ const getDeposito = async (req, res) => {
       return res.send({ result: {}, success: false, errors: [`No existe el deposito ${consecDep}`] });
     }
 
-    // Cliente/ruta: ENC/DET no los guardan; salen de NUM_DOC (PEN_COB y, si ya se cancelo, HIST_FAC).
-    // OUTER APPLY TOP 1 (primero la misma compania) para no duplicar lineas.
     const lineas = await sequelize.query(
-      `SELECT LTRIM(RTRIM(D.NUM_DOC)) AS NUM_DOC,
-              LTRIM(RTRIM(P.COD_TIP_DC)) AS COD_TIP_DC, LTRIM(RTRIM(P.CLASE_DOCUMENTO)) AS CLASE_DOCUMENTO,
-              LTRIM(RTRIM(COALESCE(P.COD_CLT, F.COD_CLT))) AS COD_CLT, LTRIM(RTRIM(CL.NOM_CLT)) AS NOM_CLT,
-              LTRIM(RTRIM(COALESCE(P.COD_ZON, F.COD_ZON))) AS COD_ZON,
-              ISNULL(D.MON_EFE, 0) AS MON_EFE, ISNULL(D.MON_CHE, 0) AS MON_CHE,
-              ISNULL(D.MON_DEP, 0) AS MON_DEP, ISNULL(D.MON_TRA, 0) AS MON_TRA,
-              LTRIM(RTRIM(D.REF)) AS REF
+      `SELECT ${CAMPOS_LINEA}
          FROM COAGRO2.erpadmin.alCXC_DET_DEP D
-         OUTER APPLY (SELECT TOP 1 PC.COD_CLT, PC.COD_ZON, PC.COD_TIP_DC, PC.CLASE_DOCUMENTO
-                        FROM COAGRO2.erpadmin.alCXC_PEN_COB PC
-                       WHERE PC.NUM_DOC = D.NUM_DOC
-                       ORDER BY CASE WHEN PC.COD_CIA = :codCia THEN 0 ELSE 1 END, PC.COD_ZON) P
-         OUTER APPLY (SELECT TOP 1 HF.COD_CLT, HF.COD_ZON
-                        FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC HF
-                       WHERE P.COD_CLT IS NULL AND HF.NUM_FAC = D.NUM_DOC
-                       ORDER BY CASE WHEN HF.COD_CIA = :codCia THEN 0 ELSE 1 END, HF.COD_ZON) F
-         OUTER APPLY (SELECT TOP 1 NOM_CLT FROM COAGRO2.erpadmin.cliente
-                       WHERE COD_CLT = COALESCE(P.COD_CLT, F.COD_CLT)) CL
+         ${datosDelDocumento(":codCia")}
         WHERE D.NUM_DEP = :numDep AND D.CTA_BCO = :ctaBco
         ORDER BY D.NUM_DOC`,
       {
@@ -186,4 +194,81 @@ const getDeposito = async (req, res) => {
   }
 };
 
-module.exports = { getDepositos, getDeposito };
+// GET /fr/deposito/documentos
+// Una fila por documento pagado (alCXC_DET_DEP) con los datos de su recibo. Acepta los mismos
+// filtros del recibo que GET /fr/deposito, mas numDoc (parcial), cliente y ruta (del documento).
+// `totales` suma TODO lo filtrado, no solo la pagina.
+const FROM_DOCUMENTOS = `
+  FROM COAGRO2.erpadmin.alCXC_DET_DEP D
+  JOIN COAGRO2.erpadmin.alCXC_ENC_DEP E ON E.NUM_DEP = D.NUM_DEP AND E.CTA_BCO = D.CTA_BCO
+  LEFT JOIN COAGRO2.erpadmin.alCXC_CTA_BCO C
+    ON C.COD_CIA = E.COD_CIA AND C.COD_BCO = E.COD_BCO AND C.CTA_BCO = E.CTA_BCO
+  ${datosDelDocumento("E.COD_CIA")}`;
+
+const getDocumentosPagados = async (req, res) => {
+  try {
+    const filtros = armarFiltros(req.query);
+    if (filtros.error) {
+      return res.send({ result: {}, success: false, errors: [filtros.error] });
+    }
+    const condiciones = filtros.where ? [filtros.where.replace(/^WHERE /, "")] : [];
+    const replacements = { ...filtros.replacements };
+
+    const numDoc = texto(req.query.numDoc);
+    if (numDoc) {
+      condiciones.push("D.NUM_DOC LIKE :numDoc");
+      replacements.numDoc = `%${numDoc}%`;
+    }
+    const cliente = texto(req.query.cliente);
+    if (cliente) {
+      condiciones.push("COALESCE(P.COD_CLT, F.COD_CLT) = :cliente");
+      replacements.cliente = cliente;
+    }
+    const ruta = texto(req.query.ruta);
+    if (ruta) {
+      condiciones.push("COALESCE(P.COD_ZON, F.COD_ZON) = :ruta");
+      replacements.ruta = ruta;
+    }
+    const where = condiciones.length ? `WHERE ${condiciones.join(" AND ")}` : "";
+    const { page, limit, offset } = getPaginacion(req.query);
+
+    const [rows, [resumen]] = await Promise.all([
+      sequelize.query(
+        `SELECT E.CONSEC_DEP, LTRIM(RTRIM(E.NUM_DEP)) AS NUM_DEP,
+                LTRIM(RTRIM(E.COD_CIA)) AS COD_CIA, LTRIM(RTRIM(E.COD_BCO)) AS COD_BCO,
+                LTRIM(RTRIM(E.CTA_BCO)) AS CTA_BCO, LTRIM(RTRIM(C.NOM_CTA)) AS NOM_CTA,
+                CONVERT(varchar(19), E.FEC_DEP, 120) AS FEC_DEP, LTRIM(RTRIM(E.IND_MON)) AS IND_MON,
+                ISNULL(LTRIM(RTRIM(E.DOC_PRO)), 'N') AS DOC_PRO, LTRIM(RTRIM(E.HandHeld)) AS HANDHELD,
+                ${CAMPOS_LINEA},
+                ISNULL(D.MON_EFE, 0) + ISNULL(D.MON_CHE, 0) + ISNULL(D.MON_DEP, 0) + ISNULL(D.MON_TRA, 0) AS MONTO_PAGADO
+           ${FROM_DOCUMENTOS}
+           ${where}
+          ORDER BY E.FEC_DEP DESC, E.CONSEC_DEP DESC, D.NUM_DOC
+          OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`,
+        { replacements: { ...replacements, offset, limit }, type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT COUNT(*) AS TOTAL,
+                ISNULL(SUM(ISNULL(D.MON_EFE, 0)), 0) AS TOTAL_EFE, ISNULL(SUM(ISNULL(D.MON_CHE, 0)), 0) AS TOTAL_CHE,
+                ISNULL(SUM(ISNULL(D.MON_DEP, 0)), 0) AS TOTAL_DEP, ISNULL(SUM(ISNULL(D.MON_TRA, 0)), 0) AS TOTAL_TRA
+           ${FROM_DOCUMENTOS}
+           ${where}`,
+        { replacements, type: QueryTypes.SELECT }
+      ),
+    ]);
+
+    const { TOTAL: total, ...totales } = resumen;
+    totales.TOTAL_PAGADO = totales.TOTAL_EFE + totales.TOTAL_CHE + totales.TOTAL_DEP + totales.TOTAL_TRA;
+    res.send({
+      result: rows,
+      totales,
+      success: true,
+      pagination: { page, limit, total, totalPages: Math.max(Math.ceil(total / limit), 1) },
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({ result: {}, success: false, errors: ["Error al consultar los documentos pagados"] });
+  }
+};
+
+module.exports = { getDepositos, getDeposito, getDocumentosPagados };

@@ -1472,6 +1472,182 @@ const getSyncRecibosPendientes = async (req, res) => {
 };
 
 //
+// GET /fr/sync/descuentos   (header Authorization: Bearer <token movil>)
+// Descuentos por cliente y articulo de TODOS los clientes de las rutas de la handheld, para
+// aplicarlos sin conexion en pedidos y cotizaciones.
+//
+// Tablas:
+//   - erpadmin.RUTA_CLIENTE      -> clientes de las rutas de la handheld
+//   - erpadmin.ARTICULO          -> solo articulos de los grupos (GRP_ART) de esas rutas
+//   - erpadmin.DESCUENTO_CLIART  -> los descuentos (CRUD web en /fr/descuentoCliart)
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     descuentos: [{ COMPANIA, CLIENTE, ARTICULO, CANT_MIN, CANT_MAX, FECHA_INICIO, FECHA_FIN,
+//                    TIPO, MONTO }]                                    -> DESCUENTO_CLIART
+//   }
+// }
+//
+// Notas:
+//  - Solo vigentes o futuros (FECHA_FIN >= hoy); la app decide por fecha del documento.
+//  - FECHA_INICIO / FECHA_FIN salen como texto 'YYYY-MM-DD' (sin hora ni zona horaria).
+//  - TIPO: 'P' porcentaje (MONTO 0-100) o 'F' monto fijo. Aplica si CANT_MIN <= cantidad <= CANT_MAX.
+//  - La app debe reemplazar toda su tabla con lo recibido (lo borrado en la web ya no viene).
+
+const getSyncDescuentos = async (req, res) => {
+  try {
+    const asignaciones = await rutaClienteModel.findAll({
+      attributes: ["CLIENTE"],
+      where: { RUTA: req.mobile.codigosRuta },
+      raw: true,
+    });
+    const codigos = [...new Set(asignaciones.map((a) => String(a.CLIENTE).trim()))];
+    const grupos = [...new Set(req.mobile.rutas.map((r) => String(r.GRUPO_ARTICULO).trim()))];
+
+    const descuentos = await porLotes(codigos, (lote) =>
+      sequelize.query(
+        `SELECT LTRIM(RTRIM(D.COMPANIA)) AS COMPANIA, LTRIM(RTRIM(D.CLIENTE)) AS CLIENTE,
+                LTRIM(RTRIM(D.ARTICULO)) AS ARTICULO, D.CANT_MIN, D.CANT_MAX,
+                CONVERT(varchar(10), D.FECHA_INICIO, 23) AS FECHA_INICIO,
+                CONVERT(varchar(10), D.FECHA_FIN, 23) AS FECHA_FIN,
+                D.TIPO, CAST(D.MONTO AS float) AS MONTO
+           FROM COAGRO2.erpadmin.DESCUENTO_CLIART D
+          WHERE D.CLIENTE IN (:lote)
+            AND D.FECHA_FIN >= CAST(GETDATE() AS date)
+            AND D.ARTICULO IN (SELECT COD_ART FROM COAGRO2.erpadmin.ARTICULO WHERE GRP_ART IN (:grupos))`,
+        { replacements: { lote, grupos }, type: QueryTypes.SELECT }
+      )
+    );
+    // El orden se aplica aqui porque los lotes llegan por separado.
+    descuentos.sort(
+      (a, b) =>
+        a.CLIENTE.localeCompare(b.CLIENTE) ||
+        a.ARTICULO.localeCompare(b.ARTICULO) ||
+        a.CANT_MIN - b.CANT_MIN ||
+        a.FECHA_INICIO.localeCompare(b.FECHA_INICIO)
+    );
+
+    res.send({
+      result: { descuentos },
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de descuentos"],
+    });
+  }
+};
+
+//
+// Promociones de temporada (web: /fr/promocion). Tres endpoints, uno por tabla, que la app une
+// por PROMOCION_ID:
+//
+// GET /fr/sync/promociones            -> erpadmin.FR_PROMOCION          (encabezado)
+// GET /fr/sync/promocionesProductos   -> erpadmin.FR_PROMOCION_PRODUCTO (a que productos aplica)
+// GET /fr/sync/promocionesDestinos    -> erpadmin.FR_PROMOCION_DESTINO  (a quien va dirigida)
+//   (header Authorization: Bearer <token movil>)
+//
+// Los tres mandan SOLO las promociones que le sirven a la handheld (PROMOS_DE_LA_HANDHELD):
+//  - ACTIVA = 'S' y FECHA_FIN >= hoy (vigentes o futuras; la app revisa FECHA_INICIO).
+//  - DESTINO T (todos) o K (tipo de cliente: la app lo compara con COD_TIP_CL de clientesCia).
+//  - DESTINO R: alguna de sus rutas es de la handheld.
+//  - DESTINO C: alguno de sus clientes esta en RUTA_CLIENTE de las rutas de la handheld.
+//
+// Respuestas (result):
+//   promociones: [{ ID, TITULO, DESCRIPCION, TIPO, FECHA_INICIO, FECHA_FIN, DESTINO,
+//                   ARTICULO_BONIFICADO, CANTIDAD_BONIFICADA, ACTIVA, FECHA_MODIFICACION }]
+//   productos:   [{ ID, PROMOCION_ID, ALCANCE, VALOR, CANTIDAD_MIN, DESCUENTO, PRECIO_ESPECIAL }]
+//   destinos:    [{ PROMOCION_ID, TIPO, VALOR }]
+//
+// Notas:
+//  - TIPO de promocion: D descuento (DESCUENTO %), P precio especial (PRECIO_ESPECIAL),
+//    B bonificacion (ARTICULO_BONIFICADO + CANTIDAD_BONIFICADA al llegar a CANTIDAD_MIN).
+//  - ALCANCE de producto: A codigo de articulo, L linea (CLASIFICACION3 de /fr/sync/articulos),
+//    T texto contenido en DES_ART (sin distinguir mayusculas).
+//  - Fechas como texto 'YYYY-MM-DD'; FECHA_MODIFICACION 'YYYY-MM-DD HH:mm:ss'.
+//  - En destinos solo van las rutas de la handheld (R) y los clientes de sus rutas (C); los K completos.
+//  - Regla de precio igual que la web (utils/precioFr.js): gana el precio mas bajo, los
+//    descuentos no se suman; las bonificaciones van aparte.
+//  - La app debe reemplazar las tres tablas completas en cada sincronizacion.
+
+const CLIENTES_DE_MIS_RUTAS = `SELECT CLIENTE FROM COAGRO2.erpadmin.RUTA_CLIENTE WHERE RUTA IN (:rutas)`;
+
+const PROMOS_DE_LA_HANDHELD = `
+  SELECT P.ID
+    FROM COAGRO2.erpadmin.FR_PROMOCION P
+   WHERE P.ACTIVA = 'S'
+     AND P.FECHA_FIN >= CAST(GETDATE() AS date)
+     AND (P.DESTINO IN ('T', 'K')
+          OR (P.DESTINO = 'R' AND EXISTS (
+                SELECT 1 FROM COAGRO2.erpadmin.FR_PROMOCION_DESTINO X
+                 WHERE X.PROMOCION_ID = P.ID AND X.TIPO = 'R' AND X.VALOR IN (:rutas)))
+          OR (P.DESTINO = 'C' AND EXISTS (
+                SELECT 1 FROM COAGRO2.erpadmin.FR_PROMOCION_DESTINO X
+                 WHERE X.PROMOCION_ID = P.ID AND X.TIPO = 'C'
+                   AND X.VALOR IN (${CLIENTES_DE_MIS_RUTAS}))))`;
+
+// Arma el handler de una de las tablas de promociones: misma forma de respuesta y de error.
+const syncPromocion = (clave, nombre, sql) => async (req, res) => {
+  try {
+    const filas = await sequelize.query(sql, {
+      replacements: { rutas: req.mobile.codigosRuta },
+      type: QueryTypes.SELECT,
+    });
+    res.send({ result: { [clave]: filas }, success: true, errors: [] });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: [`Error al preparar la sincronizacion de ${nombre}`],
+    });
+  }
+};
+
+const getSyncPromociones = syncPromocion(
+  "promociones",
+  "promociones",
+  `SELECT P.ID, P.TITULO, P.DESCRIPCION, P.TIPO,
+          CONVERT(varchar(10), P.FECHA_INICIO, 23) AS FECHA_INICIO,
+          CONVERT(varchar(10), P.FECHA_FIN, 23) AS FECHA_FIN,
+          P.DESTINO, LTRIM(RTRIM(P.ARTICULO_BONIFICADO)) AS ARTICULO_BONIFICADO,
+          P.CANTIDAD_BONIFICADA, P.ACTIVA,
+          CONVERT(varchar(19), COALESCE(P.FECHA_MODIFICACION, P.FECHA_CREACION), 120) AS FECHA_MODIFICACION
+     FROM COAGRO2.erpadmin.FR_PROMOCION P
+    WHERE P.ID IN (${PROMOS_DE_LA_HANDHELD})
+    ORDER BY P.FECHA_INICIO, P.ID`
+);
+
+const getSyncPromocionesProductos = syncPromocion(
+  "productos",
+  "productos de promociones",
+  `SELECT PP.ID, PP.PROMOCION_ID, PP.ALCANCE, LTRIM(RTRIM(PP.VALOR)) AS VALOR, PP.CANTIDAD_MIN,
+          CAST(PP.DESCUENTO AS float) AS DESCUENTO, CAST(PP.PRECIO_ESPECIAL AS float) AS PRECIO_ESPECIAL
+     FROM COAGRO2.erpadmin.FR_PROMOCION_PRODUCTO PP
+    WHERE PP.PROMOCION_ID IN (${PROMOS_DE_LA_HANDHELD})
+    ORDER BY PP.PROMOCION_ID, PP.ID`
+);
+
+const getSyncPromocionesDestinos = syncPromocion(
+  "destinos",
+  "destinos de promociones",
+  `SELECT D.PROMOCION_ID, D.TIPO, LTRIM(RTRIM(D.VALOR)) AS VALOR
+     FROM COAGRO2.erpadmin.FR_PROMOCION_DESTINO D
+    WHERE D.PROMOCION_ID IN (${PROMOS_DE_LA_HANDHELD})
+      AND (D.TIPO = 'K'
+           OR (D.TIPO = 'R' AND D.VALOR IN (:rutas))
+           OR (D.TIPO = 'C' AND D.VALOR IN (${CLIENTES_DE_MIS_RUTAS})))
+    ORDER BY D.PROMOCION_ID, D.TIPO, D.VALOR`
+);
+
+//
 // GET /fr/sync/metas[?anio=2026&mes=11]   (header Authorization: Bearer <token movil>)
 // Metas de venta por articulo SOLO del agente de la handheld del token: RUTA_ASIGNADA_RT.AGENTE
 // (codigo de ruteo) se traduce con AGENTE_ASOC_RT.CODIGO -> AGENTE, que es
@@ -1583,6 +1759,10 @@ const getSyncMetas = async (req, res) => {
 };
 
 module.exports = {
+  getSyncPromociones,
+  getSyncPromocionesProductos,
+  getSyncPromocionesDestinos,
+  getSyncDescuentos,
   getSyncMetas,
   getSyncRecibosPendientes,
   getSyncCuentasBanco,
