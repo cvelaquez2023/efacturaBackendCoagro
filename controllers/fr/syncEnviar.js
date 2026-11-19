@@ -88,9 +88,23 @@
 //    duplicado: true, no se sobrescribe). Si CTA_BCO + NUM_DEP existe con otra compania o banco es
 //    conflicto (alCXC_DET_DEP solo distingue por NUM_DEP + CTA_BCO). IND_MON: 'L' local, 'D' dolar.
 //    COD_CIA + COD_BCO + CTA_BCO debe existir en alCXC_CTA_BCO (la app las baja de GET /fr/sync/cuentasBanco).
+//  - Descuento de linea (pedidos y cotizaciones), SOLO con FR_VALIDAR_DESCUENTO=S en el .env: el
+//    vendedor elige el % con un contador y no puede pasar de un tope; la app ya lo impide y el
+//    servidor lo vuelve a revisar (app vieja o modificada). Tope = mismo calculo que la app, en
+//    utils/topeDescuento.js: el mayor entre DESCUENTO_CLIART del cliente (TIPO 'P', vigente en FEC_PED,
+//    cantidad en rango) y las promociones FR_PROMOCION del cliente o de su ruta; si ninguno aplica,
+//    CLIENTE_CIA.DESCUENTO. Cantidad = CNT_MAX + CNT_MIN / FACTOR_VENTA (unidades de almacen).
+//    Cada linea debe cumplir 0 <= POR_DSC_AP <= tope + 0.01 y MON_DSC = MON_TOT * POR_DSC_AP / 100
+//    (+-0.01). Si una no cumple se rechaza ESE documento (ok: false, error) y nada de el se guarda; los
+//    demas del envio siguen. Se revisa solo al insertar: un reenvio de un pedido ya guardado sigue
+//    respondiendo duplicado. Los topes se consultan una sola vez para todas las lineas del envio.
+//    Activarla cuando todas las handhelds tengan la version que limita el % y ya hayan enviado sus
+//    pedidos pendientes: la app vieja dejaba escribir cualquier %, y esos pedidos quedarian
+//    rechazados sin poder corregirse desde la app.
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
+const { calcularTopesDescuento } = require("../../utils/topeDescuento");
 
 const FECHA_REGEX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 // TIP_DOC del pedido: "F" = pedido (por defecto), "C" = cotizacion.
@@ -280,6 +294,63 @@ const procesarVisita = async (contexto, v) => {
   }
 };
 
+// Validacion del % de descuento por linea (ver cabecera). Solo con FR_VALIDAR_DESCUENTO=S.
+const validarDescuentoActiva = () => texto(process.env.FR_VALIDAR_DESCUENTO).toUpperCase() === "S";
+const TOLERANCIA_DESCUENTO = 0.01;
+const formatoPorc = (v) => String(Math.round(Number(v) * 10000) / 10000);
+
+// Topes de todas las lineas del envio en una sola pasada: Map pedido -> [{ tope, cantidad }] (por linea).
+const topesDePedidos = async (pedidos) => {
+  const filas = [];
+  const dueno = [];
+  for (const p of pedidos) {
+    const enc = (p && p.encabezado) || {};
+    const lineas = Array.isArray(p && p.lineas) ? p.lineas : [];
+    for (const l of lineas) {
+      filas.push({
+        COD_CIA: enc.COD_CIA, COD_ZON: enc.COD_ZON, COD_CLT: enc.COD_CLT, FEC_PED: enc.FEC_PED,
+        COD_ART: l && l.COD_ART, CNT_MAX: l && l.CNT_MAX, CNT_MIN: l && l.CNT_MIN, MON_PRC_MX: l && l.MON_PRC_MX,
+      });
+      dueno.push(p);
+    }
+  }
+  const topes = await calcularTopesDescuento(filas);
+  const porPedido = new Map();
+  topes.forEach((t, i) => {
+    if (!porPedido.has(dueno[i])) porPedido.set(dueno[i], []);
+    porPedido.get(dueno[i]).push(t);
+  });
+  return porPedido;
+};
+
+// Mensaje de la primera linea que no cumple; null si todas cumplen (o la validacion esta apagada).
+const errorDescuento = (contexto, p, NUM_PED) => {
+  if (!contexto.topesDescuento) return null;
+  const topes = contexto.topesDescuento.get(p) || [];
+  for (const [i, l] of p.lineas.entries()) {
+    const codArt = texto(l.COD_ART);
+    const tope = topes[i] ? topes[i].tope : 0;
+    const vacio = l.POR_DSC_AP === undefined || l.POR_DSC_AP === null || l.POR_DSC_AP === "";
+    const porc = vacio ? 0 : Number(l.POR_DSC_AP);
+    if (!Number.isFinite(porc) || porc < 0) {
+      return `Pedido ${NUM_PED}: el descuento de ${codArt} (${texto(l.POR_DSC_AP)}) no es un porcentaje valido`;
+    }
+    if (porc > tope + TOLERANCIA_DESCUENTO) {
+      return `Pedido ${NUM_PED}: el descuento de ${codArt} (${formatoPorc(porc)}%) supera el permitido (${formatoPorc(tope)}%)`;
+    }
+    const total = Number(l.MON_TOT) || 0;
+    const monto = Number(l.MON_DSC) || 0;
+    const esperado = (total * porc) / 100;
+    if (Math.abs(monto - esperado) > TOLERANCIA_DESCUENTO) {
+      return (
+        `Pedido ${NUM_PED}: el monto de descuento de ${codArt} (${monto}) no corresponde al ` +
+        `${formatoPorc(porc)}% de ${total} (${Math.round(esperado * 100) / 100})`
+      );
+    }
+  }
+  return null;
+};
+
 const procesarPedido = async (contexto, p) => {
   const enc = (p && p.encabezado) || {};
   const lineas = Array.isArray(p && p.lineas) ? p.lineas : [];
@@ -304,6 +375,7 @@ const procesarPedido = async (contexto, p) => {
   try {
     let duplicado = false;
     let conflicto = null;
+    let rechazo = null;
     await sequelize.transaction(async (transaction) => {
       // Las lineas se unen solo por COD_CIA + NUM_PED: el numero no puede estar en otra ruta.
       const [existe] = await sequelize.query(
@@ -327,6 +399,9 @@ const procesarPedido = async (contexto, p) => {
             `(cliente ${texto(existe.COD_CLT)}, ${texto(existe.HOR_INI)})`;
         }
       } else {
+        // Solo al insertar: un reenvio de lo ya guardado sigue siendo duplicado.
+        rechazo = errorDescuento(contexto, p, NUM_PED);
+        if (rechazo) return;
         await insertar(
           "alFAC_ENC_PED",
           { ...tomarColumnas(enc, COLUMNAS_ENC), COD_CIA, COD_ZON, NUM_PED, TIP_DOC },
@@ -344,6 +419,7 @@ const procesarPedido = async (contexto, p) => {
       }
     });
     if (conflicto) return { ...salida, ok: false, conflicto: true, error: conflicto };
+    if (rechazo) return { ...salida, ok: false, error: rechazo };
     return { ...salida, ok: true, duplicado };
   } catch (e) {
     console.log(e);
@@ -641,6 +717,7 @@ const procesarPromocional = async (contexto, p) => {
 //  - El backend decide la tabla segun CAMPO (TABLA de la app es informativa). La columna sale SIEMPRE
 //    de CAMPOS_CAMBIO_CLIENTE, nunca del texto recibido. Cualquier otro CAMPO: "Campo no editable".
 //  - Campos de erpadmin.cliente: se actualizan TODAS las filas del cliente (una por COD_ZON).
+//    Incluye ALIAS (nombre comercial, max 80; "" -> NULL).
 //  - Campos de CLIENTE_CIA: la fila de COD_CIA si viene; si no, la misma que manda /fr/sync/clientes
 //    (CINCOH primero). Si el cliente no tiene fila en CLIENTE_CIA: ok false (no se crea).
 //  - NIVEL_PRECIO debe existir en NIVEL_LISTA. NO se toca LST_PRE: en NIVEL_LISTA todos los niveles
@@ -648,9 +725,18 @@ const procesarPromocional = async (contexto, p) => {
 //  - DIAS_VISITA (RUTA_CLIENTE): un cliente solo tiene UN dia por ruta (misma regla que el CRUD
 //    /fr/rutaCliente), asi que VALOR debe traer un solo dia. Si es el mismo que ya tiene, no se toca
 //    (conserva su ORDEN); si es otro, se mueve a ese dia al final: ORDEN = MAX(ORDEN) + 1 de la ruta y dia.
-//  - Divisiones geograficas (CLIENTE_CIA): DIVISION_GEOGRAFICA1 (departamento), DIVISION_GEOGRAFICA2
-//    (municipio) y DIVISION_GEOGRAFICA3 (distrito, columna division_geografica3) son texto libre que
-//    escribe el vendedor: no se validan contra catalogos. Largo maximo 12, 12 y 50. "" -> NULL.
+//  - Divisiones geograficas (CLIENTE_CIA, reforma 2024, opcion B; ver GET /fr/sync/municipios):
+//    DIVISION_GEOGRAFICA1 = departamento, DIVISION_GEOGRAFICA2 = distrito (codigo del ERP) y
+//    DIVISION_GEOGRAFICA3 (columna division_geografica3) = municipio nuevo. "" -> NULL (se permite
+//    vaciar). Si traen valor (validarDivision):
+//      1 debe existir en erpadmin.DIVISION_GEOGRAFICA1 del pais del cliente;
+//      2 debe existir en erpadmin.DIVISION_GEOGRAFICA2 para el departamento;
+//      3 debe existir en erpadmin.FR_MUNICIPIO para el departamento;
+//      si en el MISMO envio vienen el 2 y el 3 del cliente, el distrito debe ser de ese municipio
+//      segun erpadmin.FR_DISTRITO (si no, se rechazan los dos).
+//    Departamento de referencia: el ultimo que vino en el envio para ese cliente; si no vino, el
+//    guardado en CLIENTE_CIA. Pais: CLIENTE_CIA.COD_PAIS si tiene departamentos; si no (en este ERP
+//    COD_PAIS suele ser un codigo de vendedor), FR_PAIS_DIVISION o 'SAL'.
 //  - Textos que no caben en la columna: ok false (no se recortan). VALOR_ANTERIOR y FECHA no se usan.
 const textoLibre = (largo, vacio) => ({ tipo: "texto", largo, vacio });
 const numero = (min, max, entero = false) => ({ tipo: "numero", min, max, entero });
@@ -658,6 +744,8 @@ const CAMPOS_CAMBIO_CLIENTE = {
   // erpadmin.cliente
   NOM_CLT: { tabla: "cliente", columna: "NOM_CLT", ...textoLibre(150, "requerido") },
   DIR_CLT: { tabla: "cliente", columna: "DIR_CLT", ...textoLibre(null, "vacio") },
+  // Nombre comercial (varchar(80), admite null). "" -> NULL.
+  ALIAS: { tabla: "cliente", columna: "ALIAS", ...textoLibre(80, "null") },
   NIVEL_PRECIO: {
     tabla: "cliente", columna: "NIVEL_PRECIO", tipo: "catalogo", largo: 150, nombre: "nivel de precio",
     existe: `SELECT 1 AS OK FROM COAGRO2.erpadmin.NIVEL_LISTA WHERE NIVEL_PRECIO = :valor`,
@@ -681,11 +769,12 @@ const CAMPOS_CAMBIO_CLIENTE = {
   POR_EXC_CS: { tabla: "cia", columna: "POR_EXC_CS", ...numero(0, 100) },
   DESCUENTO: { tabla: "cia", columna: "DESCUENTO", ...numero(0, 100) },
   IND_MON: { tabla: "cia", columna: "IND_MON", tipo: "opcion", opciones: ["L", "D"] },
-  // Divisiones geograficas: 1 = departamento, 2 = municipio, 3 = distrito. Texto libre que escribe
-  // el vendedor (no se valida contra catalogos), al largo de su columna. "" -> NULL.
-  DIVISION_GEOGRAFICA1: { tabla: "cia", columna: "DIVISION_GEOGRAFICA1", ...textoLibre(12, "null") },
-  DIVISION_GEOGRAFICA2: { tabla: "cia", columna: "DIVISION_GEOGRAFICA2", ...textoLibre(12, "null") },
-  DIVISION_GEOGRAFICA3: { tabla: "cia", columna: "division_geografica3", ...textoLibre(50, "null") },
+  // Divisiones geograficas (reforma 2024, opcion B): 1 = departamento, 2 = distrito (codigo del ERP,
+  // DIVISION_GEOGRAFICA2), 3 = municipio nuevo (FR_MUNICIPIO). Se validan contra los catalogos en
+  // validarDivision. "" -> NULL.
+  DIVISION_GEOGRAFICA1: { tabla: "cia", columna: "DIVISION_GEOGRAFICA1", ...textoLibre(12, "null"), division: 1 },
+  DIVISION_GEOGRAFICA2: { tabla: "cia", columna: "DIVISION_GEOGRAFICA2", ...textoLibre(12, "null"), division: 2 },
+  DIVISION_GEOGRAFICA3: { tabla: "cia", columna: "division_geografica3", ...textoLibre(50, "null"), division: 3 },
   // erpadmin.RUTA_CLIENTE
   DIAS_VISITA: { tabla: "ruta", tipo: "dias" },
 };
@@ -762,6 +851,80 @@ const cambiarDiaVisita = async (contexto, COD_CLT, c) => {
   return null;
 };
 
+// Pais de las divisiones geograficas del cliente. CLIENTE_CIA.COD_PAIS en este ERP no siempre es un
+// pais (alFAC_PAIS mezcla paises con vendedores, p. ej. 'VRR1'): si no tiene departamentos en
+// erpadmin.DIVISION_GEOGRAFICA1 se usa FR_PAIS_DIVISION (por defecto 'SAL', el unico con divisiones).
+const paisDivision = async (codPais) => {
+  const pais = texto(codPais);
+  if (pais) {
+    const [hay] = await sequelize.query(
+      `SELECT TOP 1 1 AS OK FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA1 WHERE PAIS = :pais`,
+      { replacements: { pais }, type: QueryTypes.SELECT }
+    );
+    if (hay) return pais;
+  }
+  return texto(process.env.FR_PAIS_DIVISION) || "SAL";
+};
+
+// Valida un cambio de DIVISION_GEOGRAFICA1/2/3 contra los catalogos (ver comentario de
+// procesarCambioCliente). `valor` ya viene normalizado (null = vaciar). Devuelve el error o null.
+const validarDivision = async (contexto, COD_CLT, def, valor, cia) => {
+  if (valor === null) return null;
+  const pais = await paisDivision(cia.COD_PAIS);
+  // Lo que vino en este envio para el cliente (ultimo valor de cada campo).
+  const envio = contexto.divisionesEnvio.get(COD_CLT) || {};
+  const tieneEnvio = (campo) => Object.prototype.hasOwnProperty.call(envio, campo);
+  const depto = tieneEnvio("DIVISION_GEOGRAFICA1") ? envio.DIVISION_GEOGRAFICA1 : texto(cia.DIVISION_GEOGRAFICA1);
+  const existe = async (sql, replacements) =>
+    (await sequelize.query(sql, { replacements, type: QueryTypes.SELECT })).length > 0;
+
+  if (def.division === 1) {
+    const ok = await existe(
+      `SELECT TOP 1 1 AS OK FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA1
+        WHERE PAIS = :pais AND DIVISION_GEOGRAFICA1 = :valor`,
+      { pais, valor }
+    );
+    return ok ? null : `El departamento ${valor} no existe (pais ${pais})`;
+  }
+
+  const que = def.division === 2 ? "el distrito" : "el municipio";
+  if (!depto) return `No se puede validar ${que} ${valor}: el cliente no tiene departamento`;
+
+  if (def.division === 3) {
+    const ok = await existe(
+      `SELECT TOP 1 1 AS OK FROM COAGRO2.erpadmin.FR_MUNICIPIO
+        WHERE PAIS = :pais AND DIVISION_GEOGRAFICA1 = :depto AND MUNICIPIO = :valor`,
+      { pais, depto, valor }
+    );
+    if (!ok) return `El municipio ${valor} no existe en el departamento ${depto}`;
+  } else {
+    const ok = await existe(
+      `SELECT TOP 1 1 AS OK FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA2
+        WHERE PAIS = :pais AND DIVISION_GEOGRAFICA1 = :depto AND DIVISION_GEOGRAFICA2 = :valor`,
+      { pais, depto, valor }
+    );
+    if (!ok) return `El distrito ${valor} no existe en el departamento ${depto}`;
+  }
+
+  // Distrito y municipio en el MISMO envio: el distrito debe ser de ese municipio (FR_DISTRITO).
+  if (tieneEnvio("DIVISION_GEOGRAFICA2") && tieneEnvio("DIVISION_GEOGRAFICA3")) {
+    const distrito = def.division === 2 ? valor : envio.DIVISION_GEOGRAFICA2;
+    const municipio = def.division === 3 ? valor : envio.DIVISION_GEOGRAFICA3;
+    if (distrito && municipio) {
+      const [asignado] = await sequelize.query(
+        `SELECT LTRIM(RTRIM(MUNICIPIO)) AS MUNICIPIO FROM COAGRO2.erpadmin.FR_DISTRITO
+          WHERE PAIS = :pais AND DIVISION_GEOGRAFICA1 = :depto AND DIVISION_GEOGRAFICA2 = :distrito`,
+        { replacements: { pais, depto, distrito }, type: QueryTypes.SELECT }
+      );
+      if (!asignado) return `El distrito ${distrito} no tiene municipio asignado (FR_DISTRITO)`;
+      if (asignado.MUNICIPIO !== municipio) {
+        return `El distrito ${distrito} no pertenece al municipio ${municipio} (es del municipio ${asignado.MUNICIPIO})`;
+      }
+    }
+  }
+  return null;
+};
+
 const procesarCambioCliente = async (contexto, c) => {
   const COD_CLT = texto(c.COD_CLT);
   const CAMPO = texto(c.CAMPO);
@@ -797,7 +960,7 @@ const procesarCambioCliente = async (contexto, c) => {
     // CLIENTE_CIA: la fila de COD_CIA si viene; si no, la misma que manda /fr/sync/clientes.
     const COD_CIA = texto(c.COD_CIA);
     const [cia] = await sequelize.query(
-      `SELECT TOP 1 COD_CIA FROM COAGRO2.erpadmin.CLIENTE_CIA
+      `SELECT TOP 1 COD_CIA, COD_PAIS, DIVISION_GEOGRAFICA1 FROM COAGRO2.erpadmin.CLIENTE_CIA
         WHERE COD_CLT = :COD_CLT AND (:COD_CIA = '' OR COD_CIA = :COD_CIA)
         ORDER BY CASE WHEN COD_CIA = 'CINCOH' THEN 0 ELSE 1 END, COD_CIA`,
       { replacements: { COD_CLT, COD_CIA }, type: QueryTypes.SELECT }
@@ -809,6 +972,10 @@ const procesarCambioCliente = async (contexto, c) => {
     }
     const v = await valorCambioCliente(CAMPO, def, c.VALOR);
     if (v.error) return falla(v.error);
+    if (def.division) {
+      const error = await validarDivision(contexto, COD_CLT, def, v.valor, cia);
+      if (error) return falla(error);
+    }
     await sequelize.query(
       `UPDATE COAGRO2.erpadmin.CLIENTE_CIA SET ${def.columna} = :valor WHERE COD_CLT = :COD_CLT AND COD_CIA = :COD_CIA`,
       { replacements: { valor: v.valor, COD_CLT, COD_CIA: cia.COD_CIA } }
@@ -818,6 +985,21 @@ const procesarCambioCliente = async (contexto, c) => {
     console.log(e);
     return falla(mensajeError(e));
   }
+};
+
+// COD_CLT -> { DIVISION_GEOGRAFICA1?, DIVISION_GEOGRAFICA2?, DIVISION_GEOGRAFICA3? } con el ultimo
+// valor recibido de cada uno ("" = lo vacian).
+const divisionesDelEnvio = (cambios) => {
+  const mapa = new Map();
+  for (const c of cambios) {
+    const CAMPO = texto(c && c.CAMPO);
+    const def = Object.prototype.hasOwnProperty.call(CAMPOS_CAMBIO_CLIENTE, CAMPO) ? CAMPOS_CAMBIO_CLIENTE[CAMPO] : null;
+    if (!def || !def.division) continue;
+    const COD_CLT = texto(c.COD_CLT);
+    if (!mapa.has(COD_CLT)) mapa.set(COD_CLT, {});
+    mapa.get(COD_CLT)[CAMPO] = c.VALOR !== null && typeof c.VALOR === "object" ? "" : texto(c.VALOR);
+  }
+  return mapa;
 };
 
 const postSyncEnviar = async (req, res) => {
@@ -869,6 +1051,10 @@ const postSyncEnviar = async (req, res) => {
       articulos: new Set(articulos.map((a) => texto(a.COD_ART))),
       handheld: texto(req.mobile.handheld && req.mobile.handheld.HANDHELD),
       agenteDeRuta: new Map(req.mobile.rutas.map((r) => [texto(r.RUTA), texto(r.AGENTE)])),
+      // Ultimo DIVISION_GEOGRAFICA1/2/3 de cada cliente en este envio (para validarDivision).
+      divisionesEnvio: divisionesDelEnvio(cambiosCliente),
+      // null = validacion de descuento apagada (FR_VALIDAR_DESCUENTO distinto de S).
+      topesDescuento: validarDescuentoActiva() && pedidos.length ? await topesDePedidos(pedidos) : null,
     };
 
     // Orden: ubicaciones, visitas, pedidos, aprobaciones, depositos, promocionales, consecutivos,

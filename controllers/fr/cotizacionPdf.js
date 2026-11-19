@@ -14,6 +14,8 @@
 //   - erpadmin.ARTICULO      -> descripcion del articulo (COD_ART)
 //   - erpadmin.alFAC_CND_PAG -> descripcion de la condicion de pago (COD_CND + COD_CIA)
 //   - erpadmin.alFAC_DIR_EMB_CLT -> detalle de la direccion de entrega (COD_CLT + COD_CIA + DIR_EMB = DIR_ENT)
+//   - erpadmin.ARTICULO_EXISTENCIA_LOTE -> lotes con existencia (y vencimiento) de cada articulo en COD_BOD
+//                                         (COMPANIA siempre 'COAGRO')
 //   - dte.dbo.empresa        -> datos del emisor (nombre, NIT, NRC, direccion, telefono, correo)
 //
 // Respuesta: application/pdf (inline). Si no existe o no se puede generar: JSON
@@ -66,7 +68,7 @@ const error = (res, mensaje) => res.send({ result: {}, success: false, errors: [
 const buscarDocumento = async (cia, pedido, rutas) => {
   const replacements = { cia, pedido, rutas };
   const filtroRuta = rutas ? "AND P.COD_ZON IN (:rutas)" : "";
-  const [[encabezado], lineas] = await Promise.all([
+  const [[encabezado], lineas, lotes] = await Promise.all([
     sequelize.query(
       `SELECT P.COD_CIA, P.COD_ZON, P.COD_CLT, P.NUM_PED, P.TIP_DOC, P.COD_BOD, P.COD_CND, P.MONEDA,
               P.OBS_PED, P.DIR_ENT, P.MON_SIV, P.MON_DSC, P.MON_IMP_VT, P.MON_CIV, P.NIVEL_PRECIO,
@@ -97,11 +99,33 @@ const buscarDocumento = async (cia, pedido, rutas) => {
         ORDER BY D.NUM_LN`,
       { replacements: { cia, pedido }, type: QueryTypes.SELECT }
     ),
+    // Lotes con existencia de los articulos del documento en su bodega (COD_BOD = bodega del ERP).
+    // Un lote en varias localizaciones sale una vez con la existencia sumada; el que vence primero va primero.
+    sequelize.query(
+      `SELECT L.ARTICULO, L.LOTE, CONVERT(varchar(10), L.FECHA_VENCIMIENTO, 103) AS VENCE
+         FROM COAGRO2.erpadmin.ARTICULO_EXISTENCIA_LOTE L
+        WHERE L.COMPANIA = 'COAGRO'
+          AND L.BODEGA = (SELECT TOP 1 COD_BOD FROM COAGRO2.erpadmin.alFAC_ENC_PED
+                           WHERE COD_CIA = :cia AND NUM_PED = :pedido)
+          AND L.ARTICULO IN (SELECT COD_ART FROM COAGRO2.erpadmin.alFAC_DET_PED
+                              WHERE COD_CIA = :cia AND NUM_PED = :pedido)
+        GROUP BY L.ARTICULO, L.LOTE, L.FECHA_VENCIMIENTO
+       HAVING SUM(L.EXISTENCIA) > 0
+        ORDER BY L.ARTICULO, L.FECHA_VENCIMIENTO, L.LOTE`,
+      { replacements: { cia, pedido }, type: QueryTypes.SELECT }
+    ),
   ]);
-  return encabezado ? { encabezado, lineas } : null;
+  if (!encabezado) return null;
+  const lotesPorArticulo = new Map();
+  for (const l of lotes) {
+    const art = texto(l.ARTICULO);
+    if (!lotesPorArticulo.has(art)) lotesPorArticulo.set(art, []);
+    lotesPorArticulo.get(art).push({ lote: texto(l.LOTE), vence: texto(l.VENCE) });
+  }
+  return { encabezado, lineas, lotesPorArticulo };
 };
 
-const armarPdf = async ({ encabezado: e, lineas }, empresaId) => {
+const armarPdf = async ({ encabezado: e, lineas, lotesPorArticulo }, empresaId) => {
   const [empresa] = await Sqlempresa(empresaId);
   const emp = empresa || {};
   const { plantilla, logo } = recursos();
@@ -150,6 +174,7 @@ const armarPdf = async ({ encabezado: e, lineas }, empresaId) => {
         codigo: texto(l.COD_ART),
         descripcion: texto(l.DES_ART) || texto(l.COD_ART),
         bonificacion: ["S", "1"].includes(texto(l.ART_BON).toUpperCase()),
+        lotes: lotesPorArticulo.get(texto(l.COD_ART)) || [],
         cantidad: cantidad(l.CNT_MAX),
         precio: dinero(l.MON_PRC_MX),
         descuento: dinero(l.MON_DSC),
