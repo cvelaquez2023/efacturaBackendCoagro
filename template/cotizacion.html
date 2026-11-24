@@ -40,6 +40,8 @@
     .detalle tbody tr:nth-child(even) td { background: #f7fbf7; }
     .detalle td.num { text-align: right; white-space: nowrap; }
     .detalle td.cod { color: #555; white-space: nowrap; }
+    .detalle td.lote { font-size: 9px; white-space: nowrap; }
+    .detalle td.lote .vence { color: #777; }
     .detalle tr { page-break-inside: avoid; }
 
     .pie-detalle { display: flex; justify-content: space-between; gap: 16px; margin-top: 14px; page-break-inside: avoid; }
@@ -116,6 +118,7 @@
         <th style="width: 30px;">#</th>
         <th style="width: 85px;">Código</th>
         <th>Descripción</th>
+        <th style="width: 110px;">Lote / Vence</th>
         <th class="num" style="width: 60px;">Cant.</th>
         <th class="num" style="width: 80px;">Precio</th>
         <th class="num" style="width: 75px;">Desc.</th>
@@ -128,6 +131,7 @@
         <td>{{this.numero}}</td>
         <td class="cod">{{this.codigo}}</td>
         <td>{{this.descripcion}}{{#if this.bonificacion}} <em class="verde">(bonificación)</em>{{/if}}</td>
+        <td class="lote">{{#each this.lotes}}<div>{{this.lote}} <span class="vence">{{this.vence}}</span></div>{{else}}<span class="vence">—</span>{{/each}}</td>
         <td class="num">{{this.cantidad}}</td>
         <td class="num">{{this.precio}}</td>
         <td class="num">{{this.descuento}}</td>

@@ -4,6 +4,13 @@
 // Se genera al momento (no se guarda) y siempre lleva el logo de Coagro (template/logo.jpeg).
 //
 //   GET /fr/deposito/:consecDep/pdf[?numDoc=...]     (web, sesion normal, rol Admin o Fr)
+//   GET /fr/mobile/recibo/:numDep/pdf[?ctaBco=...&numDoc=...]
+//                                                    (app, token movil, rol RUTA: solo rutas de la handheld)
+//
+// La app no conoce CONSEC_DEP: busca por NUM_DEP (numero de recibo) y CTA_BCO; sin CTA_BCO y con
+// varios depositos con ese NUM_DEP toma el mayor CONSEC_DEP. Si alguna linea del recibo es de una
+// ruta que no es de la handheld (COD_ZON de PEN_COB / HIST_FAC), responde "No existe el recibo X en
+// tus rutas", sin revelar que existe.
 //
 // La app hace un recibo por documento pagado: una pagina por cada linea de alCXC_DET_DEP del
 // deposito. Con ?numDoc solo sale la pagina de ese documento.
@@ -141,6 +148,18 @@ const unirPaginas = (htmls) => {
 </html>`;
 };
 
+// Arma el PDF (una pagina por linea) y lo responde inline. Comun a la web y a la app.
+const enviarPdfRecibo = async (res, recibo, numDoc) => {
+  const opciones = { logo: logoBase64() };
+  const html = unirPaginas(recibo.lineas.map((l) => htmlRecibo(reciboDeLinea(recibo.encabezado, l), opciones)));
+  const pdf = await generatePdfWithPuppeteer(html, undefined, MARGENES);
+
+  const nombre = `Recibo_${recibo.encabezado.NUM_DEP}${numDoc ? `_${numDoc}` : ""}.pdf`;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="${nombre.replace(/[^\w.-]/g, "_")}"`);
+  res.send(Buffer.from(pdf));
+};
+
 // GET /fr/deposito/:consecDep/pdf
 const getReciboPdf = async (req, res) => {
   try {
@@ -156,19 +175,45 @@ const getReciboPdf = async (req, res) => {
         numDoc ? `El deposito ${consecDep} no tiene el documento ${numDoc}` : `El deposito ${consecDep} no tiene lineas`
       );
     }
-
-    const opciones = { logo: logoBase64() };
-    const html = unirPaginas(recibo.lineas.map((l) => htmlRecibo(reciboDeLinea(recibo.encabezado, l), opciones)));
-    const pdf = await generatePdfWithPuppeteer(html, undefined, MARGENES);
-
-    const nombre = `Recibo_${recibo.encabezado.NUM_DEP}${numDoc ? `_${numDoc}` : ""}.pdf`;
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${nombre.replace(/[^\w.-]/g, "_")}"`);
-    res.send(Buffer.from(pdf));
+    await enviarPdfRecibo(res, recibo, numDoc);
   } catch (err) {
     console.log(err);
     if (!res.headersSent) error(res, "Error al generar el PDF del recibo");
   }
 };
 
-module.exports = { getReciboPdf, reciboDeLinea, unirPaginas };
+// GET /fr/mobile/recibo/:numDep/pdf[?ctaBco=...&numDoc=...]
+// La app no conoce CONSEC_DEP (IDENTITY del servidor): se busca por NUM_DEP (+ CTA_BCO si viene;
+// sin ella y con varios, el mayor CONSEC_DEP). Solo recibos de las rutas de la handheld: si alguna
+// linea es de otra ruta (o no se sabe de cual) responde igual que si no existiera.
+const getReciboPdfMovil = async (req, res) => {
+  try {
+    const numDep = texto(req.params.numDep);
+    const ctaBco = texto(req.query.ctaBco);
+    const numDoc = texto(req.query.numDoc);
+    if (!numDep) return error(res, "El numero de recibo es obligatorio");
+    const noExiste = () => error(res, `No existe el recibo ${numDep} en tus rutas`);
+
+    const [deposito] = await sequelize.query(
+      `SELECT TOP 1 CONSEC_DEP
+         FROM COAGRO2.erpadmin.alCXC_ENC_DEP
+        WHERE LTRIM(RTRIM(NUM_DEP)) = :numDep
+          ${ctaBco ? "AND LTRIM(RTRIM(CTA_BCO)) = :ctaBco" : ""}
+        ORDER BY CONSEC_DEP DESC`,
+      { replacements: { numDep, ctaBco }, type: QueryTypes.SELECT }
+    );
+    if (!deposito) return noExiste();
+
+    const recibo = await buscarRecibo(deposito.CONSEC_DEP, numDoc);
+    if (!recibo || !recibo.lineas.length) return noExiste();
+    const rutas = new Set((req.mobile.codigosRuta || []).map(texto));
+    if (recibo.lineas.some((l) => !rutas.has(texto(l.COD_ZON)))) return noExiste();
+
+    await enviarPdfRecibo(res, recibo, numDoc);
+  } catch (err) {
+    console.log(err);
+    if (!res.headersSent) error(res, "Error al generar el PDF del recibo");
+  }
+};
+
+module.exports = { getReciboPdf, getReciboPdfMovil, reciboDeLinea, unirPaginas };

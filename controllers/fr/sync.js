@@ -18,7 +18,7 @@
 //     rutas:       [{ RUTA, DESCRIPCION, ACTIVA, PERIODICIDAD }],   -> RUTA_RT
 //     clientes:    [{ COD_ZON, COD_CLT, FEC_PLN, NOM_CLT, DIR_CLT,
 //                     DESGLOSE, TIPO_IMPUESTO, TIPO_TARIFA, PORC_TARIFA,
-//                     NIVEL_PRECIO,                                  -> CLIENTE
+//                     NIVEL_PRECIO, ALIAS,                           -> CLIENTE
 //                     COD_CIA, LST_PRE, IND_MON, NOM_CTO, ...,
 //                     SUBTIPODOC }],                                 -> CLIENTE_CIA (mismo objeto)
 //     rutaOrden:   [{ RUTA, CLIENTE, DIA, ORDEN }],                 -> alFAC_RUTA_ORDEN
@@ -29,7 +29,7 @@
 //     subtiposDoc:   [{ COMPANIA, TIPO, SUBTIPO, DESCRIPCION }]     -> erpadmin.SUBTIPO_DOC (TIPO 'FAC')
 //     paises:        [{ COD_PAIS, COD_CIA, NOMBRE, ETIQUETA_DIV_GEO1, ETIQUETA_DIV_GEO2 }] -> erpadmin.alFAC_PAIS
 //     divisiones1:   [{ PAIS, COMPANIA, DIVISION_GEOGRAFICA1, NOMBRE }]                     -> erpadmin.DIVISION_GEOGRAFICA1 (departamentos)
-//     divisiones2:   [{ PAIS, COMPANIA, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, NOMBRE }] -> erpadmin.DIVISION_GEOGRAFICA2 (municipios)
+//     divisiones2:   [{ PAIS, COMPANIA, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, NOMBRE }] -> erpadmin.DIVISION_GEOGRAFICA2 (distritos)
 //     condicionesPago:        [{ COD_CND, COD_CIA, CAN_DIA, DES_CND }]  -> erpadmin.alFAC_CND_PAG
 //     actividadesComerciales: [{ COMPANIA, CODIGO, DESCRIPCION }]       -> erpadmin.ACTIVIDAD_COMERCIAL
 //   }
@@ -52,13 +52,16 @@
 //  - Los endpoints de la handheld solo leen tablas de erpadmin; CINCOH (el ERP) solo sirve para
 //    llenar esas tablas, no se consulta desde aqui.
 //  - NIVEL_PRECIO del cliente sale de erpadmin.cliente.NIVEL_PRECIO (nombre del nivel, tal cual).
+//  - ALIAS (nombre comercial) sale de erpadmin.cliente.ALIAS, con trim; null si esta vacio. No se lee
+//    CINCOH.CLIENTE.ALIAS: se llena desde la app (cambiosCliente, CAMPO 'ALIAS').
 //  - tiposCliente, nivelesPrecio, subtiposDoc, paises, divisiones1, divisiones2, condicionesPago y
 //    actividadesComerciales son catálogos completos (no dependen de la ruta) y salen tal cual de
 //    sus tablas. Los usa la pantalla de pedido (país, región, condición de pago, actividad).
-//  - Divisiones geográficas: 1 = departamento, 2 = municipio (hijo de la 1), 3 = distrito (hijo
-//    de la 2). El cliente trae DIVISION_GEOGRAFICA1/2/3 (de CLIENTE_CIA.division_geografica3 para
-//    la 3). No se manda catálogo de distritos: erpadmin no tiene tabla DIVISION_GEOGRAFICA3 y la
-//    del ERP (CINCOH.DIVISION_GEOGRAFICA3) está vacía.
+//  - Divisiones geográficas (reforma 2024, opción B: el ERP no se toca). El cliente trae
+//    DIVISION_GEOGRAFICA1 = departamento, DIVISION_GEOGRAFICA2 = distrito (los 261 "municipios"
+//    viejos del ERP, divisiones2) y DIVISION_GEOGRAFICA3 (CLIENTE_CIA.division_geografica3) =
+//    municipio NUEVO (código de erpadmin.FR_MUNICIPIO). La jerarquía de la reforma (municipios y a
+//    qué municipio pertenece cada distrito) va en GET /fr/sync/municipios.
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
@@ -100,6 +103,7 @@ const getSyncClientes = async (req, res) => {
       `SELECT RC.RUTA, RC.CLIENTE, RC.DIA, RC.ORDEN,
               C.COD_CLT, C.NOM_CLT, C.DIR_CLT, C.FEC_PLN, C.DESGLOSE, C.TIPO_IMPUESTO,
               C.TIPO_TARIFA, C.PORC_TARIFA, C.NIVEL_PRECIO,
+              NULLIF(LTRIM(RTRIM(C.ALIAS)), '') AS ALIAS,
               ${CAMPOS_CLIENTE_CIA_CC},
               S.SUBTIPO AS SUBTIPODOC
          FROM COAGRO2.erpadmin.RUTA_CLIENTE RC
@@ -202,13 +206,16 @@ const getSyncClientes = async (req, res) => {
         { type: QueryTypes.SELECT }
       ),
       sequelize.query(
-        `SELECT PAIS, COMPANIA, DIVISION_GEOGRAFICA1, NOMBRE
+        // NOMBRE: el ERP lo rellena con CHAR(160) (espacio duro), que LTRIM/RTRIM no quita.
+        `SELECT PAIS, COMPANIA, DIVISION_GEOGRAFICA1,
+                LTRIM(RTRIM(REPLACE(NOMBRE, CHAR(160), ' '))) AS NOMBRE
            FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA1
           ORDER BY PAIS, DIVISION_GEOGRAFICA1`,
         { type: QueryTypes.SELECT }
       ),
       sequelize.query(
-        `SELECT PAIS, COMPANIA, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, NOMBRE
+        `SELECT PAIS, COMPANIA, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2,
+                LTRIM(RTRIM(REPLACE(NOMBRE, CHAR(160), ' '))) AS NOMBRE
            FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA2
           ORDER BY PAIS, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2`,
         { type: QueryTypes.SELECT }
@@ -684,11 +691,23 @@ const getSyncCobrosAgente = async (req, res) => {
 //   success: true,
 //   errors: [],
 //   result: {
-//     consecutivos: [{ RUTA, COMPANIA, PEDIDO, RECIBO, DEVOLUCION, FACTURA, ... }] -> RUTA_CONSECUT_RT
+//     consecutivos: [{ RUTA, COMPANIA, PEDIDO, RECIBO, DEVOLUCION, FACTURA, ...,
+//                      USA_FLETE, MINIMO_FLETE, MONTO_FLETE, ARTICULO_FLETE }] -> RUTA_CONSECUT_RT
+//     articulosFlete: [{ COD_ART, DES_ART, IMPUESTO, ES_OTRO_CARGO, ... }] -> ARTICULO (mismas
+//                     columnas que /articulos) de los ARTICULO_FLETE de las rutas con USA_FLETE 'S'
 //   }
 // }
 //
 // Nota: una ruta de la handheld sin configuracion en RUTA_CONSECUT_RT simplemente no viene.
+//
+// Flete por ruta (USA_FLETE S/N, MINIMO_FLETE, MONTO_FLETE, ARTICULO_FLETE; docs/fr-flete-ruta.sql):
+// si USA_FLETE = 'S' y el total del pedido CON descuentos y CON IVA (sin contar la linea del
+// flete) es menor que MINIMO_FLETE, la app agrega una linea ARTICULO_FLETE, cantidad 1, precio
+// MONTO_FLETE (sin IVA; el IVA sale del IMPUESTO del articulo). Si el pedido llega al minimo, la
+// linea se quita. El flete se toma de la ruta con la que se hace el pedido. Aplica igual a pedidos
+// (TIP_DOC 'F') y cotizaciones ('C'). Al aprobar una cotizacion (aprobaciones de /fr/sync/enviar) el
+// servidor solo cambia TIP_DOC: las lineas, incluido el flete, quedan como se enviaron, asi que la app
+// debe revisar el flete ANTES de enviar la aprobacion si permite editar la cotizacion.
 //
 // FACTURA es el consecutivo de cotizaciones de la app (NUM_PED = FACTURA). Antes de leer, a las
 // rutas de la handheld que aun no tienen serie de cotizacion (FACTURA NULL, vacio o sin prefijo
@@ -765,8 +784,24 @@ const getSyncConsecutivos = async (req, res) => {
       raw: true,
     });
 
+    // Articulos de flete de las rutas que lo usan (normalmente solo el 103), aparte de /articulos:
+    // ese endpoint filtra por GRP_ART y el articulo de flete puede no estar en el grupo de la ruta.
+    const codigosFlete = [
+      ...new Set(
+        consecutivos
+          .filter((c) => String(c.USA_FLETE || "").trim() === "S" && c.ARTICULO_FLETE)
+          .map((c) => String(c.ARTICULO_FLETE).trim())
+      ),
+    ].filter(Boolean);
+    const articulosFlete = codigosFlete.length
+      ? await sequelize.query(
+          `SELECT ${CAMPOS_ARTICULO} FROM COAGRO2.erpadmin.ARTICULO WHERE COD_ART IN (:codigosFlete)`,
+          { replacements: { codigosFlete }, type: QueryTypes.SELECT }
+        )
+      : [];
+
     res.send({
-      result: { consecutivos },
+      result: { consecutivos, articulosFlete },
       success: true,
       errors: [],
     });
@@ -1882,7 +1917,121 @@ const getSyncMetas = async (req, res) => {
   }
 };
 
+//
+// GET /fr/sync/municipios   (header Authorization: Bearer <token movil>)
+// División territorial de la reforma (2024: 14 departamentos, 44 municipios, 262 distritos), para
+// las listas encadenadas Departamento -> Municipio -> Distrito de la ficha del cliente. Opción B: el
+// ERP no se toca; sus 261 "municipios" (erpadmin.DIVISION_GEOGRAFICA2, en divisiones2 de
+// /fr/sync/clientes) son los DISTRITOS, y aquí va a qué municipio nuevo pertenece cada uno.
+//
+// Tablas (creadas y cargadas en COAGRO2 en nov 2026; 44 municipios y 262 distritos):
+//   - erpadmin.FR_MUNICIPIO -> los 44 municipios; MUNICIPIO = código CAT-013 de Hacienda, único
+//                              solo dentro del departamento.
+//   - erpadmin.FR_DISTRITO  -> código del ERP (DIVISION_GEOGRAFICA2) -> MUNICIPIO.
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     municipios: [{ PAIS, DIVISION_GEOGRAFICA1, MUNICIPIO, NOMBRE }],                -> FR_MUNICIPIO
+//     distritos:  [{ PAIS, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, MUNICIPIO }]  -> FR_DISTRITO
+//   }
+// }
+// Textos con trim. municipios por departamento y NOMBRE; distritos por departamento y código.
+// En CLIENTE_CIA el municipio va en division_geografica3 (DIVISION_GEOGRAFICA3 en cambiosCliente).
+// Un código del ERP sin fila en distritos no tiene municipio asignado todavía (revisión manual).
+// La app debe reemplazar las dos tablas completas en cada carga.
+
+const getSyncMunicipios = async (req, res) => {
+  try {
+    const [municipios, distritos] = await Promise.all([
+      sequelize.query(
+        `SELECT LTRIM(RTRIM(PAIS)) AS PAIS, LTRIM(RTRIM(DIVISION_GEOGRAFICA1)) AS DIVISION_GEOGRAFICA1,
+                LTRIM(RTRIM(MUNICIPIO)) AS MUNICIPIO, LTRIM(RTRIM(NOMBRE)) AS NOMBRE
+           FROM COAGRO2.erpadmin.FR_MUNICIPIO
+          ORDER BY PAIS, DIVISION_GEOGRAFICA1, NOMBRE`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
+        `SELECT LTRIM(RTRIM(PAIS)) AS PAIS, LTRIM(RTRIM(DIVISION_GEOGRAFICA1)) AS DIVISION_GEOGRAFICA1,
+                LTRIM(RTRIM(DIVISION_GEOGRAFICA2)) AS DIVISION_GEOGRAFICA2, LTRIM(RTRIM(MUNICIPIO)) AS MUNICIPIO
+           FROM COAGRO2.erpadmin.FR_DISTRITO
+          ORDER BY PAIS, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2`,
+        { type: QueryTypes.SELECT }
+      ),
+    ]);
+    res.send({ result: { municipios, distritos }, success: true, errors: [] });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de municipios"],
+    });
+  }
+};
+
+//
+// GET /fr/sync/empresa   (header Authorization: Bearer <token movil>)
+// Datos del emisor para que la app arme SIN conexion el PDF del pedido/cotizacion con el mismo
+// encabezado que controllers/fr/cotizacionPdf.js. La empresa es la del usuario del token
+// (req.mobile.usuario.empresa), no viaja en la URL, y solo si esta activa (activa = 1).
+//
+// Tabla: dte.dbo.empresa. Excepcion a "la movil solo lee erpadmin": el emisor solo existe ahi
+// (es la misma fuente que usa Sqlempresa para el PDF del servidor).
+// SOLO campos publicos: nunca credenciales (userApi, pwdApi, pwdPrivado, pwdPublica, jwtSecret,
+// emailEnvioDtePass, tokenUser...). Por eso no se reutiliza Sqlempresa, que trae todo.
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     empresa: { Empresa_id, nombre, nombreComercial, nit, nrc, codActividad, desActividad,
+//                complementoDir, telefono, correoDte }
+//   }
+// }
+// nrc sin guiones (como Sqlempresa); textos con trim. La app reemplaza lo guardado en "Cargar datos".
+
+const getSyncEmpresa = async (req, res) => {
+  try {
+    const [empresa] = await sequelize.query(
+      `SELECT Empresa_id,
+              LTRIM(RTRIM(nombre)) AS nombre,
+              LTRIM(RTRIM(nombreComercial)) AS nombreComercial,
+              LTRIM(RTRIM(nit)) AS nit,
+              LTRIM(RTRIM(REPLACE(nrc, '-', ''))) AS nrc,
+              LTRIM(RTRIM(codActividad)) AS codActividad,
+              LTRIM(RTRIM(desActividad)) AS desActividad,
+              LTRIM(RTRIM(complementoDir)) AS complementoDir,
+              LTRIM(RTRIM(telefono)) AS telefono,
+              LTRIM(RTRIM(correoDte)) AS correoDte
+         FROM dte.dbo.empresa
+        WHERE Empresa_id = :empresa AND activa = 1`,
+      { replacements: { empresa: req.mobile.usuario.empresa ?? null }, type: QueryTypes.SELECT }
+    );
+    if (!empresa) {
+      return res.send({
+        result: {},
+        success: false,
+        errors: ["La empresa del usuario no existe o no está activa"],
+      });
+    }
+    res.send({ result: { empresa }, success: true, errors: [] });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de la empresa"],
+    });
+  }
+};
+
 module.exports = {
+  getSyncMunicipios,
+  getSyncEmpresa,
   getSyncPromocionales,
   getSyncPromociones,
   getSyncPromocionesProductos,

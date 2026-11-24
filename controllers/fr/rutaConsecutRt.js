@@ -1,3 +1,4 @@
+const { validarFlete } = require("../../utils/fleteRuta");
 const { rutaConsecutRtModel, rutaRtModel } = require("../../models");
 const { getPaginacion, respuestaPaginada } = require("../../utils/paginacion");
 
@@ -60,6 +61,11 @@ const COLUMNAS = [
   "DTE_NOTA_CREDITO",
   "SUBTIPO_OTRO_CREDITO",
   "DTE_OTRO_CREDITO",
+  // Flete por ruta (docs/fr-flete-ruta.sql): usaFlete, minimoFlete, montoFlete, articuloFlete.
+  "USA_FLETE",
+  "MINIMO_FLETE",
+  "MONTO_FLETE",
+  "ARTICULO_FLETE",
 ];
 
 // Las 6 unicas NOT NULL en BD (fuera de RUTA/COMPANIA): deben mandarse en el POST.
@@ -195,6 +201,11 @@ const postRutaConsecutRt = async (req, res) => {
       if (valor !== undefined) valores[columna] = valor;
     });
 
+    const errorFlete = await validarFlete(valores);
+    if (errorFlete) {
+      return res.send({ result: {}, success: false, errors: [errorFlete] });
+    }
+
     const data = await rutaConsecutRtModel.create(valores);
     res.send({ result: data, success: true });
   } catch (error) {
@@ -230,6 +241,11 @@ const putRutaConsecutRt = async (req, res) => {
       const valor = req.body[dbAJs(columna)];
       if (valor !== undefined) cambios[columna] = valor;
     });
+
+    const errorFlete = await validarFlete({ ...actual, ...cambios });
+    if (errorFlete) {
+      return res.send({ result: {}, success: false, errors: [errorFlete] });
+    }
 
     const data = await rutaConsecutRtModel.update(cambios, {
       where: { RUTA: ruta },
