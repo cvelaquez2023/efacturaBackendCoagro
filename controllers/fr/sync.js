@@ -691,11 +691,23 @@ const getSyncCobrosAgente = async (req, res) => {
 //   success: true,
 //   errors: [],
 //   result: {
-//     consecutivos: [{ RUTA, COMPANIA, PEDIDO, RECIBO, DEVOLUCION, FACTURA, ... }] -> RUTA_CONSECUT_RT
+//     consecutivos: [{ RUTA, COMPANIA, PEDIDO, RECIBO, DEVOLUCION, FACTURA, ...,
+//                      USA_FLETE, MINIMO_FLETE, MONTO_FLETE, ARTICULO_FLETE }] -> RUTA_CONSECUT_RT
+//     articulosFlete: [{ COD_ART, DES_ART, IMPUESTO, ES_OTRO_CARGO, ... }] -> ARTICULO (mismas
+//                     columnas que /articulos) de los ARTICULO_FLETE de las rutas con USA_FLETE 'S'
 //   }
 // }
 //
 // Nota: una ruta de la handheld sin configuracion en RUTA_CONSECUT_RT simplemente no viene.
+//
+// Flete por ruta (USA_FLETE S/N, MINIMO_FLETE, MONTO_FLETE, ARTICULO_FLETE; docs/fr-flete-ruta.sql):
+// si USA_FLETE = 'S' y el total del pedido CON descuentos y CON IVA (sin contar la linea del
+// flete) es menor que MINIMO_FLETE, la app agrega una linea ARTICULO_FLETE, cantidad 1, precio
+// MONTO_FLETE (sin IVA; el IVA sale del IMPUESTO del articulo). Si el pedido llega al minimo, la
+// linea se quita. El flete se toma de la ruta con la que se hace el pedido. Aplica igual a pedidos
+// (TIP_DOC 'F') y cotizaciones ('C'). Al aprobar una cotizacion (aprobaciones de /fr/sync/enviar) el
+// servidor solo cambia TIP_DOC: las lineas, incluido el flete, quedan como se enviaron, asi que la app
+// debe revisar el flete ANTES de enviar la aprobacion si permite editar la cotizacion.
 //
 // FACTURA es el consecutivo de cotizaciones de la app (NUM_PED = FACTURA). Antes de leer, a las
 // rutas de la handheld que aun no tienen serie de cotizacion (FACTURA NULL, vacio o sin prefijo
@@ -772,8 +784,24 @@ const getSyncConsecutivos = async (req, res) => {
       raw: true,
     });
 
+    // Articulos de flete de las rutas que lo usan (normalmente solo el 103), aparte de /articulos:
+    // ese endpoint filtra por GRP_ART y el articulo de flete puede no estar en el grupo de la ruta.
+    const codigosFlete = [
+      ...new Set(
+        consecutivos
+          .filter((c) => String(c.USA_FLETE || "").trim() === "S" && c.ARTICULO_FLETE)
+          .map((c) => String(c.ARTICULO_FLETE).trim())
+      ),
+    ].filter(Boolean);
+    const articulosFlete = codigosFlete.length
+      ? await sequelize.query(
+          `SELECT ${CAMPOS_ARTICULO} FROM COAGRO2.erpadmin.ARTICULO WHERE COD_ART IN (:codigosFlete)`,
+          { replacements: { codigosFlete }, type: QueryTypes.SELECT }
+        )
+      : [];
+
     res.send({
-      result: { consecutivos },
+      result: { consecutivos, articulosFlete },
       success: true,
       errors: [],
     });

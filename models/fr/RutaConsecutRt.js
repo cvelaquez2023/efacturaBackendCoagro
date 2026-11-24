@@ -115,6 +115,19 @@ const RutaConsecutRt = sequelize.define(
     DTE_NOTA_CREDITO: campoTexto("DTE_NOTA_CREDITO", 100),
     SUBTIPO_OTRO_CREDITO: campoTexto("SUBTIPO_OTRO_CREDITO", 28),
     DTE_OTRO_CREDITO: campoTexto("DTE_OTRO_CREDITO", 100),
+    // Flete por ruta (columnas nuevas, ver docs/fr-flete-ruta.sql). Si el pedido suma menos de
+    // MINIMO_FLETE (con descuentos y con IVA) la app agrega una linea ARTICULO_FLETE por MONTO_FLETE.
+    USA_FLETE: {
+      type: DataTypes.STRING(1),
+      allowNull: false,
+      defaultValue: "N",
+      validate: {
+        isIn: { args: [["S", "N"]], msg: "El campo USA_FLETE debe ser S o N" },
+      },
+    },
+    MINIMO_FLETE: { type: DataTypes.DECIMAL(18, 2), allowNull: true },
+    MONTO_FLETE: { type: DataTypes.DECIMAL(18, 2), allowNull: true },
+    ARTICULO_FLETE: campoTexto("ARTICULO_FLETE", 20),
   },
   {
     schema: "ERPADMIN",
