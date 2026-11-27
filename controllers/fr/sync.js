@@ -29,7 +29,9 @@
 //     subtiposDoc:   [{ COMPANIA, TIPO, SUBTIPO, DESCRIPCION }]     -> erpadmin.SUBTIPO_DOC (TIPO 'FAC')
 //     paises:        [{ COD_PAIS, COD_CIA, NOMBRE, ETIQUETA_DIV_GEO1, ETIQUETA_DIV_GEO2 }] -> erpadmin.alFAC_PAIS
 //     divisiones1:   [{ PAIS, COMPANIA, DIVISION_GEOGRAFICA1, NOMBRE }]                     -> erpadmin.DIVISION_GEOGRAFICA1 (departamentos)
-//     divisiones2:   [{ PAIS, COMPANIA, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, NOMBRE }] -> erpadmin.DIVISION_GEOGRAFICA2 (distritos)
+//     divisiones2:   [{ PAIS, COMPANIA, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, NOMBRE }] -> erpadmin.DIVISION_GEOGRAFICA2 (municipios)
+//     divisiones3:   [{ PAIS, COMPANIA, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, DIVISION_GEOGRAFICA3, NOMBRE }]
+//                                                                                          -> erpadmin.DIVISION_GEOGRAFICA3 (distritos)
 //     condicionesPago:        [{ COD_CND, COD_CIA, CAN_DIA, DES_CND }]  -> erpadmin.alFAC_CND_PAG
 //     actividadesComerciales: [{ COMPANIA, CODIGO, DESCRIPCION }]       -> erpadmin.ACTIVIDAD_COMERCIAL
 //   }
@@ -54,19 +56,21 @@
 //  - NIVEL_PRECIO del cliente sale de erpadmin.cliente.NIVEL_PRECIO (nombre del nivel, tal cual).
 //  - ALIAS (nombre comercial) sale de erpadmin.cliente.ALIAS, con trim; null si esta vacio. No se lee
 //    CINCOH.CLIENTE.ALIAS: se llena desde la app (cambiosCliente, CAMPO 'ALIAS').
-//  - tiposCliente, nivelesPrecio, subtiposDoc, paises, divisiones1, divisiones2, condicionesPago y
+//  - tiposCliente, nivelesPrecio, subtiposDoc, paises, divisiones1/2/3, condicionesPago y
 //    actividadesComerciales son catálogos completos (no dependen de la ruta) y salen tal cual de
 //    sus tablas. Los usa la pantalla de pedido (país, región, condición de pago, actividad).
-//  - Divisiones geográficas (reforma 2024, opción B: el ERP no se toca). El cliente trae
-//    DIVISION_GEOGRAFICA1 = departamento, DIVISION_GEOGRAFICA2 = distrito (los 261 "municipios"
-//    viejos del ERP, divisiones2) y DIVISION_GEOGRAFICA3 (CLIENTE_CIA.division_geografica3) =
-//    municipio NUEVO (código de erpadmin.FR_MUNICIPIO). La jerarquía de la reforma (municipios y a
-//    qué municipio pertenece cada distrito) va en GET /fr/sync/municipios.
+//  - Divisiones geográficas (reforma 2024, catálogos nativos de Softland en erpadmin, PAIS 'ESA').
+//    El cliente trae DIVISION_GEOGRAFICA1 = departamento (divisiones1, 14), DIVISION_GEOGRAFICA2 =
+//    municipio (divisiones2, 44) y DIVISION_GEOGRAFICA3 (CLIENTE_CIA.division_geografica3) = distrito
+//    (divisiones3, 262). Cada nivel se une al anterior por sus códigos: municipio = D1 + D2,
+//    distrito = D1 + D2 + D3. Los mismos catálogos van en GET /fr/sync/municipios.
 
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
 const { rutaClienteModel, rutaRtModel, rutaConsecutRtModel } = require("../../models");
-const { COLUMNAS_ENC, COLUMNAS_DET, FECHAS_ENC } = require("./syncEnviar");
+const {
+  COLUMNAS_ENC, COLUMNAS_DET, FECHAS_ENC, COLUMNAS_ENC_DEV, COLUMNAS_DET_DEV, FECHAS_ENC_DEV, FECHAS_ENC_INV,
+} = require("./syncEnviar");
 
 // Columnas de erpadmin.CLIENTE_CIA (se envian tal cual a la handheld). SUBTIPODOC no va aqui:
 // se traduce a codigo en getSyncClientesCia.
@@ -175,6 +179,7 @@ const getSyncClientes = async (req, res) => {
       paises,
       divisiones1,
       divisiones2,
+      divisiones3,
       condicionesPago,
       actividadesComerciales,
     ] = await Promise.all([
@@ -221,6 +226,13 @@ const getSyncClientes = async (req, res) => {
         { type: QueryTypes.SELECT }
       ),
       sequelize.query(
+        `SELECT PAIS, COMPANIA, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, DIVISION_GEOGRAFICA3,
+                LTRIM(RTRIM(REPLACE(NOMBRE, CHAR(160), ' '))) AS NOMBRE
+           FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA3
+          ORDER BY PAIS, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, DIVISION_GEOGRAFICA3`,
+        { type: QueryTypes.SELECT }
+      ),
+      sequelize.query(
         `SELECT COD_CND, COD_CIA, CAN_DIA, DES_CND
            FROM COAGRO2.erpadmin.alFAC_CND_PAG
           ORDER BY COD_CIA, CAN_DIA, COD_CND`,
@@ -247,6 +259,7 @@ const getSyncClientes = async (req, res) => {
         paises,
         divisiones1,
         divisiones2,
+        divisiones3,
         condicionesPago,
         actividadesComerciales,
       },
@@ -972,6 +985,196 @@ const getSyncCotizaciones = async (req, res) => {
   }
 };
 
+//
+// GET /fr/sync/notasCredito[?dias=30]   (header Authorization: Bearer <token movil>)
+// Notas de credito de las RUTAS de la handheld (subidas con POST /fr/sync/enviar -> notasCredito),
+// para que la app muestre su historial y su estado: todas las pendientes (DOC_PRO 'N' o NULL) y las
+// demas con FEC_DEV en los ultimos `dias` dias (por defecto 30, maximo 180).
+//
+// Tablas:
+//   - erpadmin.alFAC_ENC_DEV -> encabezados con COD_ZON en las rutas del token
+//   - erpadmin.alFAC_DET_DEV -> sus lineas (unidas por COD_CIA + COD_ZON + NUM_DEV)
+//   - erpadmin.cliente       -> NOM_CLT
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     dias: 30,
+//     notasCredito: [{ encabezado: { COD_CIA, COD_ZON, NUM_DEV, NOM_CLT, DOC_PRO, ... },  -> COLUMNAS_ENC_DEV de syncEnviar.js
+//                      lineas: [{ COD_ART, IND_DEV, CNT_MAX, ... }] }]                   -> COLUMNAS_DET_DEV
+//   }
+// }
+//
+// Notas:
+//  - Fechas (HOR_INI, HOR_FIN, FEC_DEV) como texto 'YYYY-MM-DD HH:MM:SS'. Orden: FEC_DEV desc.
+//  - Textos sin los espacios al final. La app une con lo suyo por COD_CIA + COD_ZON + NUM_DEV y
+//    reemplaza las ya enviadas con lo recibido (las viejas ya procesadas dejan de venir).
+const DIAS_NC_DEFECTO = 30;
+const DIAS_NC_MAX = 180;
+const FILTRO_NC = `E.COD_ZON IN (:rutas)
+   AND (ISNULL(E.DOC_PRO, 'N') = 'N' OR E.FEC_DEV >= DATEADD(day, -1 * :dias, CAST(GETDATE() AS date)))`;
+
+const getSyncNotasCredito = async (req, res) => {
+  try {
+    const valor = String(req.query.dias ?? "").trim();
+    let dias = DIAS_NC_DEFECTO;
+    if (valor) {
+      if (!/^\d+$/.test(valor) || Number(valor) < 1 || Number(valor) > DIAS_NC_MAX) {
+        return res.send({ result: {}, success: false, errors: [`dias debe ser un entero entre 1 y ${DIAS_NC_MAX}`] });
+      }
+      dias = Number(valor);
+    }
+    const columnasEnc = ["COD_CIA", "COD_ZON", "NUM_DEV", "DOC_PRO", ...COLUMNAS_ENC_DEV].map((c) =>
+      FECHAS_ENC_DEV.includes(c) ? `CONVERT(varchar(19), E.${c}, 120) AS ${c}` : `E.${c}`
+    );
+    const limpiar = (fila) =>
+      Object.fromEntries(Object.entries(fila).map(([k, v]) => [k, typeof v === "string" ? v.trim() : v]));
+    const llave = (cia, zona, num) => `${String(cia).trim()}|${String(zona).trim()}|${String(num).trim()}`;
+
+    const encabezados = await porLotes(req.mobile.codigosRuta, (rutas) =>
+      sequelize.query(
+        `SELECT ${columnasEnc.join(", ")}, LTRIM(RTRIM(C.NOM_CLT)) AS NOM_CLT
+           FROM COAGRO2.erpadmin.alFAC_ENC_DEV E
+           OUTER APPLY (SELECT TOP 1 NOM_CLT FROM COAGRO2.erpadmin.cliente WHERE COD_CLT = E.COD_CLT) C
+          WHERE ${FILTRO_NC}
+          ORDER BY E.FEC_DEV DESC, E.NUM_DEV DESC`,
+        { replacements: { rutas, dias }, type: QueryTypes.SELECT }
+      )
+    );
+    // Lineas con el mismo criterio que los encabezados (join): no se manda la lista de NUM_DEV.
+    const lineas = await porLotes(req.mobile.codigosRuta, (rutas) =>
+      sequelize.query(
+        `SELECT D.COD_CIA AS _CIA, D.COD_ZON AS _ZON, D.NUM_DEV AS _NUM,
+                ${COLUMNAS_DET_DEV.map((c) => `D.${c}`).join(", ")}
+           FROM COAGRO2.erpadmin.alFAC_DET_DEV D
+           JOIN COAGRO2.erpadmin.alFAC_ENC_DEV E
+             ON E.COD_CIA = D.COD_CIA AND E.COD_ZON = D.COD_ZON AND E.NUM_DEV = D.NUM_DEV
+          WHERE ${FILTRO_NC}
+          ORDER BY D.COD_CIA, D.COD_ZON, D.NUM_DEV, D.COD_ART`,
+        { replacements: { rutas, dias }, type: QueryTypes.SELECT }
+      )
+    );
+
+    const porDocumento = new Map();
+    for (const { _CIA, _ZON, _NUM, ...linea } of lineas) {
+      const k = llave(_CIA, _ZON, _NUM);
+      if (!porDocumento.has(k)) porDocumento.set(k, []);
+      porDocumento.get(k).push(limpiar(linea));
+    }
+    const notasCredito = encabezados.map((e) => {
+      const encabezado = limpiar(e);
+      return {
+        encabezado,
+        lineas: porDocumento.get(llave(encabezado.COD_CIA, encabezado.COD_ZON, encabezado.NUM_DEV)) || [],
+      };
+    });
+
+    res.send({ result: { dias, notasCredito }, success: true, errors: [] });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de notas de credito"],
+    });
+  }
+};
+
+//
+// GET /fr/sync/inventarios[?dias=30]   (header Authorization: Bearer <token movil>)
+// Inventarios del cliente de las RUTAS de la handheld (subidos con POST /fr/sync/enviar -> inventarios),
+// para que la app muestre el historial: todos los pendientes (DOC_PRO 'N' o NULL) y los demas con
+// FEC_INV en los ultimos `dias` dias (por defecto 30, maximo 180).
+//
+// Tablas:
+//   - erpadmin.alFAC_ENC_INV -> encabezados con COD_ZON en las rutas del token
+//   - erpadmin.alFAC_DET_INV -> sus lineas (unidas por COD_CIA + COD_ZON + NUM_INV)
+//   - erpadmin.cliente       -> NOM_CLT
+//
+// Respuesta:
+// {
+//   success: true,
+//   errors: [],
+//   result: {
+//     dias: 30,
+//     inventarios: [{ encabezado: { COD_CIA, COD_ZON, NUM_INV, COD_CLT, NOM_CLT, HOR_INI, HOR_FIN, FEC_INV,
+//                                   NUM_ITM, DOC_PRO },
+//                     lineas: [{ COD_ART, CNT_MAX, CNT_MIN }] }]
+//   }
+// }
+//
+// Notas:
+//  - Fechas como texto 'YYYY-MM-DD HH:MM:SS'. Orden: FEC_INV desc. Textos sin espacios al final.
+//  - La app une con lo suyo por COD_CIA + COD_ZON + NUM_INV y reemplaza los ya enviados con lo recibido.
+const FILTRO_INV = `E.COD_ZON IN (:rutas)
+   AND (ISNULL(E.DOC_PRO, 'N') = 'N' OR E.FEC_INV >= DATEADD(day, -1 * :dias, CAST(GETDATE() AS date)))`;
+
+const getSyncInventarios = async (req, res) => {
+  try {
+    const valor = String(req.query.dias ?? "").trim();
+    let dias = DIAS_NC_DEFECTO;
+    if (valor) {
+      if (!/^\d+$/.test(valor) || Number(valor) < 1 || Number(valor) > DIAS_NC_MAX) {
+        return res.send({ result: {}, success: false, errors: [`dias debe ser un entero entre 1 y ${DIAS_NC_MAX}`] });
+      }
+      dias = Number(valor);
+    }
+    const limpiar = (fila) =>
+      Object.fromEntries(Object.entries(fila).map(([k, v]) => [k, typeof v === "string" ? v.trim() : v]));
+    const llave = (cia, zona, num) => `${String(cia).trim()}|${String(zona).trim()}|${String(num).trim()}`;
+
+    const encabezados = await porLotes(req.mobile.codigosRuta, (rutas) =>
+      sequelize.query(
+        `SELECT E.COD_CIA, E.COD_ZON, E.NUM_INV, E.COD_CLT, LTRIM(RTRIM(C.NOM_CLT)) AS NOM_CLT,
+                ${FECHAS_ENC_INV.map((c) => `CONVERT(varchar(19), E.${c}, 120) AS ${c}`).join(", ")},
+                E.NUM_ITM, E.DOC_PRO
+           FROM COAGRO2.erpadmin.alFAC_ENC_INV E
+           OUTER APPLY (SELECT TOP 1 NOM_CLT FROM COAGRO2.erpadmin.cliente WHERE COD_CLT = E.COD_CLT) C
+          WHERE ${FILTRO_INV}
+          ORDER BY E.FEC_INV DESC, E.NUM_INV DESC`,
+        { replacements: { rutas, dias }, type: QueryTypes.SELECT }
+      )
+    );
+    const lineas = await porLotes(req.mobile.codigosRuta, (rutas) =>
+      sequelize.query(
+        `SELECT D.COD_CIA AS _CIA, D.COD_ZON AS _ZON, D.NUM_INV AS _NUM,
+                D.COD_ART, CAST(D.CNT_MAX AS float) AS CNT_MAX, CAST(D.CNT_MIN AS float) AS CNT_MIN
+           FROM COAGRO2.erpadmin.alFAC_DET_INV D
+           JOIN COAGRO2.erpadmin.alFAC_ENC_INV E
+             ON E.COD_CIA = D.COD_CIA AND E.COD_ZON = D.COD_ZON AND E.NUM_INV = D.NUM_INV
+          WHERE ${FILTRO_INV}
+          ORDER BY D.COD_CIA, D.COD_ZON, D.NUM_INV, D.COD_ART`,
+        { replacements: { rutas, dias }, type: QueryTypes.SELECT }
+      )
+    );
+
+    const porDocumento = new Map();
+    for (const { _CIA, _ZON, _NUM, ...linea } of lineas) {
+      const k = llave(_CIA, _ZON, _NUM);
+      if (!porDocumento.has(k)) porDocumento.set(k, []);
+      porDocumento.get(k).push(limpiar(linea));
+    }
+    const inventarios = encabezados.map((e) => {
+      const encabezado = limpiar(e);
+      return {
+        encabezado,
+        lineas: porDocumento.get(llave(encabezado.COD_CIA, encabezado.COD_ZON, encabezado.NUM_INV)) || [],
+      };
+    });
+
+    res.send({ result: { dias, inventarios }, success: true, errors: [] });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de inventarios"],
+    });
+  }
+};
+
 // Busca al cliente en las rutas de la handheld. Devuelve el codigo, o null si ya respondio el error.
 const clienteDeMisRutas = async (req, res) => {
   const cliente = String(req.query.cliente || "").trim();
@@ -1667,6 +1870,7 @@ const getSyncDescuentos = async (req, res) => {
 // GET /fr/sync/promociones            -> erpadmin.FR_PROMOCION          (encabezado)
 // GET /fr/sync/promocionesProductos   -> erpadmin.FR_PROMOCION_PRODUCTO (a que productos aplica)
 // GET /fr/sync/promocionesDestinos    -> erpadmin.FR_PROMOCION_DESTINO  (a quien va dirigida)
+// GET /fr/sync/promocionesBonificados -> erpadmin.FR_PROMOCION_BONIFICADO (que regala una bonificacion)
 //   (header Authorization: Bearer <token movil>)
 //
 // Los tres mandan SOLO las promociones que le sirven a la handheld (PROMOS_DE_LA_HANDHELD):
@@ -1680,17 +1884,23 @@ const getSyncDescuentos = async (req, res) => {
 //                   ARTICULO_BONIFICADO, CANTIDAD_BONIFICADA, ACTIVA, FECHA_MODIFICACION }]
 //   productos:   [{ ID, PROMOCION_ID, ALCANCE, VALOR, CANTIDAD_MIN, DESCUENTO, PRECIO_ESPECIAL }]
 //   destinos:    [{ PROMOCION_ID, TIPO, VALOR }]
+//   bonificados: [{ ID, PROMOCION_ID, ARTICULO, CANTIDAD }]
 //
 // Notas:
 //  - TIPO de promocion: D descuento (DESCUENTO %), P precio especial (PRECIO_ESPECIAL),
-//    B bonificacion (ARTICULO_BONIFICADO + CANTIDAD_BONIFICADA al llegar a CANTIDAD_MIN).
+//    B bonificacion: regala TODOS los articulos de `bonificados` de la promocion (uno o varios),
+//    PROPORCIONAL y por producto: por cada CANTIDAD_MIN unidades de UN producto que aplica se
+//    regala CANTIDAD de cada articulo; veces = floor(cantidad del producto / CANTIDAD_MIN).
+//    Ej: CANTIDAD_MIN 10, bonificados Y x1 y Z x2; lleva 25 -> 2 de Y y 4 de Z. Los productos no se
+//    suman entre si. ARTICULO_BONIFICADO / CANTIDAD_BONIFICADA del encabezado quedaron en desuso
+//    (siempre null).
 //  - ALCANCE de producto: A codigo de articulo, L linea (CLASIFICACION3 de /fr/sync/articulos),
 //    T texto contenido en DES_ART (sin distinguir mayusculas).
 //  - Fechas como texto 'YYYY-MM-DD'; FECHA_MODIFICACION 'YYYY-MM-DD HH:mm:ss'.
 //  - En destinos solo van las rutas de la handheld (R) y los clientes de sus rutas (C); los K completos.
 //  - Regla de precio igual que la web (utils/precioFr.js): gana el precio mas bajo, los
 //    descuentos no se suman; las bonificaciones van aparte.
-//  - La app debe reemplazar las tres tablas completas en cada sincronizacion.
+//  - La app debe reemplazar las cuatro tablas completas en cada sincronizacion.
 
 const CLIENTES_DE_MIS_RUTAS = `SELECT CLIENTE FROM COAGRO2.erpadmin.RUTA_CLIENTE WHERE RUTA IN (:rutas)`;
 
@@ -1748,6 +1958,15 @@ const getSyncPromocionesProductos = syncPromocion(
      FROM COAGRO2.erpadmin.FR_PROMOCION_PRODUCTO PP
     WHERE PP.PROMOCION_ID IN (${PROMOS_DE_LA_HANDHELD})
     ORDER BY PP.PROMOCION_ID, PP.ID`
+);
+
+const getSyncPromocionesBonificados = syncPromocion(
+  "bonificados",
+  "articulos bonificados de promociones",
+  `SELECT B.ID, B.PROMOCION_ID, LTRIM(RTRIM(B.ARTICULO)) AS ARTICULO, B.CANTIDAD
+     FROM COAGRO2.erpadmin.FR_PROMOCION_BONIFICADO B
+    WHERE B.PROMOCION_ID IN (${PROMOS_DE_LA_HANDHELD})
+    ORDER BY B.PROMOCION_ID, B.ID`
 );
 
 const getSyncPromocionesDestinos = syncPromocion(
@@ -1919,49 +2138,57 @@ const getSyncMetas = async (req, res) => {
 
 //
 // GET /fr/sync/municipios   (header Authorization: Bearer <token movil>)
-// División territorial de la reforma (2024: 14 departamentos, 44 municipios, 262 distritos), para
-// las listas encadenadas Departamento -> Municipio -> Distrito de la ficha del cliente. Opción B: el
-// ERP no se toca; sus 261 "municipios" (erpadmin.DIVISION_GEOGRAFICA2, en divisiones2 de
-// /fr/sync/clientes) son los DISTRITOS, y aquí va a qué municipio nuevo pertenece cada uno.
+// División territorial de la reforma (2024) para las listas encadenadas Departamento -> Municipio ->
+// Distrito de la ficha del cliente. Sale de los catálogos NATIVOS de Softland en erpadmin (cargados
+// por el usuario en nov 2026, PAIS 'ESA'); son los códigos que se guardan en CLIENTE_CIA.
+// (Antes salía de erpadmin.FR_MUNICIPIO / FR_DISTRITO, que ya no se usan.)
 //
-// Tablas (creadas y cargadas en COAGRO2 en nov 2026; 44 municipios y 262 distritos):
-//   - erpadmin.FR_MUNICIPIO -> los 44 municipios; MUNICIPIO = código CAT-013 de Hacienda, único
-//                              solo dentro del departamento.
-//   - erpadmin.FR_DISTRITO  -> código del ERP (DIVISION_GEOGRAFICA2) -> MUNICIPIO.
+// Tablas:
+//   - erpadmin.DIVISION_GEOGRAFICA1 -> 14 departamentos (D1, p. ej. '01' Ahuachapán)
+//   - erpadmin.DIVISION_GEOGRAFICA2 -> 44 municipios   (D1 + D2, p. ej. '01' + '0113' Ahuachapán Norte)
+//   - erpadmin.DIVISION_GEOGRAFICA3 -> 262 distritos   (D1 + D2 + D3, p. ej. '01' + '0113' + '0103' Atiquizaya)
 //
 // Respuesta:
 // {
 //   success: true,
 //   errors: [],
 //   result: {
-//     municipios: [{ PAIS, DIVISION_GEOGRAFICA1, MUNICIPIO, NOMBRE }],                -> FR_MUNICIPIO
-//     distritos:  [{ PAIS, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, MUNICIPIO }]  -> FR_DISTRITO
+//     departamentos: [{ PAIS, DIVISION_GEOGRAFICA1, NOMBRE }],
+//     municipios:    [{ PAIS, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, NOMBRE }],
+//     distritos:     [{ PAIS, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, DIVISION_GEOGRAFICA3, NOMBRE }]
 //   }
 // }
-// Textos con trim. municipios por departamento y NOMBRE; distritos por departamento y código.
-// En CLIENTE_CIA el municipio va en division_geografica3 (DIVISION_GEOGRAFICA3 en cambiosCliente).
-// Un código del ERP sin fila en distritos no tiene municipio asignado todavía (revisión manual).
-// La app debe reemplazar las dos tablas completas en cada carga.
+// En CLIENTE_CIA: DIVISION_GEOGRAFICA1 = departamento, DIVISION_GEOGRAFICA2 = municipio y
+// division_geografica3 = distrito (DIVISION_GEOGRAFICA1/2/3 en cambiosCliente).
+// Textos con trim (y sin CHAR(160)), ordenados por NOMBRE dentro de su padre. La app debe reemplazar
+// las tres listas completas en cada carga.
 
+const NOMBRE_DIVISION = "LTRIM(RTRIM(REPLACE(NOMBRE, CHAR(160), ' '))) AS NOMBRE";
 const getSyncMunicipios = async (req, res) => {
   try {
-    const [municipios, distritos] = await Promise.all([
-      sequelize.query(
+    const consulta = (sql) => sequelize.query(sql, { type: QueryTypes.SELECT });
+    const [departamentos, municipios, distritos] = await Promise.all([
+      consulta(
         `SELECT LTRIM(RTRIM(PAIS)) AS PAIS, LTRIM(RTRIM(DIVISION_GEOGRAFICA1)) AS DIVISION_GEOGRAFICA1,
-                LTRIM(RTRIM(MUNICIPIO)) AS MUNICIPIO, LTRIM(RTRIM(NOMBRE)) AS NOMBRE
-           FROM COAGRO2.erpadmin.FR_MUNICIPIO
-          ORDER BY PAIS, DIVISION_GEOGRAFICA1, NOMBRE`,
-        { type: QueryTypes.SELECT }
+                ${NOMBRE_DIVISION}
+           FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA1
+          ORDER BY PAIS, DIVISION_GEOGRAFICA1`
       ),
-      sequelize.query(
+      consulta(
         `SELECT LTRIM(RTRIM(PAIS)) AS PAIS, LTRIM(RTRIM(DIVISION_GEOGRAFICA1)) AS DIVISION_GEOGRAFICA1,
-                LTRIM(RTRIM(DIVISION_GEOGRAFICA2)) AS DIVISION_GEOGRAFICA2, LTRIM(RTRIM(MUNICIPIO)) AS MUNICIPIO
-           FROM COAGRO2.erpadmin.FR_DISTRITO
-          ORDER BY PAIS, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2`,
-        { type: QueryTypes.SELECT }
+                LTRIM(RTRIM(DIVISION_GEOGRAFICA2)) AS DIVISION_GEOGRAFICA2, ${NOMBRE_DIVISION}
+           FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA2
+          ORDER BY PAIS, DIVISION_GEOGRAFICA1, NOMBRE`
+      ),
+      consulta(
+        `SELECT LTRIM(RTRIM(PAIS)) AS PAIS, LTRIM(RTRIM(DIVISION_GEOGRAFICA1)) AS DIVISION_GEOGRAFICA1,
+                LTRIM(RTRIM(DIVISION_GEOGRAFICA2)) AS DIVISION_GEOGRAFICA2,
+                LTRIM(RTRIM(DIVISION_GEOGRAFICA3)) AS DIVISION_GEOGRAFICA3, ${NOMBRE_DIVISION}
+           FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA3
+          ORDER BY PAIS, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2, NOMBRE`
       ),
     ]);
-    res.send({ result: { municipios, distritos }, success: true, errors: [] });
+    res.send({ result: { departamentos, municipios, distritos }, success: true, errors: [] });
   } catch (error) {
     console.log(error);
     res.send({
@@ -2030,6 +2257,9 @@ const getSyncEmpresa = async (req, res) => {
 };
 
 module.exports = {
+  getSyncPromocionesBonificados,
+  getSyncInventarios,
+  getSyncNotasCredito,
   getSyncMunicipios,
   getSyncEmpresa,
   getSyncPromocionales,

@@ -3,7 +3,7 @@
 // handheld del token (RUTA_ASIGNADA_RT), no de la URL.
 // Queda como GET /fr/sync/clientes, /clientesCia, /articulos, /lotes, /precios, /cobros, /cobrosAgente, /consecutivos, /configuracion, /cotizaciones, /historialPedidos, /historialFacturas,
 // /historialPedidosRuta, /historialFacturasRuta, /cuentasBanco, /recibosPendientes, /metas, /descuentos,
-// /promociones, /promocionesProductos, /promocionesDestinos, /promocionales, /empresa y /municipios,
+// /promociones, /promocionesProductos, /promocionesDestinos, /promocionesBonificados, /promocionales, /notasCredito, /inventarios, /empresa y /municipios,
 // y POST /fr/sync/enviar (la handheld sube lo registrado sin conexion, incluidos depositos).
 
 const { Router } = require("express");
@@ -32,7 +32,10 @@ const {
   getSyncPromociones,
   getSyncPromocionesProductos,
   getSyncPromocionesDestinos,
+  getSyncPromocionesBonificados,
   getSyncPromocionales,
+  getSyncNotasCredito,
+  getSyncInventarios,
   getSyncEmpresa,
   getSyncMunicipios,
 } = require("../../controllers/fr/sync");
@@ -66,7 +69,10 @@ router.get("/descuentos", getSyncDescuentos);
 router.get("/promociones", getSyncPromociones);
 router.get("/promocionesProductos", getSyncPromocionesProductos);
 router.get("/promocionesDestinos", getSyncPromocionesDestinos);
+router.get("/promocionesBonificados", getSyncPromocionesBonificados);
 router.get("/promocionales", getSyncPromocionales);
+router.get("/notasCredito", getSyncNotasCredito);
+router.get("/inventarios", getSyncInventarios);
 router.get("/empresa", getSyncEmpresa);
 router.get("/municipios", getSyncMunicipios);
 router.post("/enviar", postSyncEnviar);

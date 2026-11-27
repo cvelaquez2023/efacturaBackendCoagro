@@ -2,13 +2,15 @@ const { sequelize } = require("../../config/mssql");
 const { DataTypes } = require("sequelize");
 const FrPromocionProducto = require("./FrPromocionProducto");
 const FrPromocionDestino = require("./FrPromocionDestino");
+const FrPromocionBonificado = require("./FrPromocionBonificado");
 
 /**
  * erpadmin.FR_PROMOCION: encabezado de la promocion de temporada.
  * TIPO: D = descuento, P = precio especial, B = bonificacion.
  * DESTINO: T = todos, R = rutas, K = tipos de cliente, C = clientes.
- * Si TIPO = B, ARTICULO_BONIFICADO y CANTIDAD_BONIFICADA son obligatorios;
- * si no, deben ir null (CHECK de la BD).
+ * Bonificacion (TIPO B): los articulos regalados van en FR_PROMOCION_BONIFICADO (uno o varios).
+ * ARTICULO_BONIFICADO / CANTIDAD_BONIFICADA quedaron en desuso: siempre null
+ * (CHECK de la BD tras docs/fr-promocion-bonificados.sql).
  */
 const FrPromocion = sequelize.define(
   "FR_PROMOCION",
@@ -66,5 +68,6 @@ const FrPromocion = sequelize.define(
 // constraints:false: las FK (con ON DELETE CASCADE) ya existen en la BD.
 FrPromocion.hasMany(FrPromocionProducto, { as: "productos", foreignKey: "PROMOCION_ID", constraints: false });
 FrPromocion.hasMany(FrPromocionDestino, { as: "destinos", foreignKey: "PROMOCION_ID", constraints: false });
+FrPromocion.hasMany(FrPromocionBonificado, { as: "bonificados", foreignKey: "PROMOCION_ID", constraints: false });
 
 module.exports = FrPromocion;
