@@ -96,6 +96,26 @@ const postInvalidar = async (req, res) => {
       }
     }
 
+    // Un DTE se invalida una sola vez. Sin este control se reenviaba y Hacienda
+    // respondía 015 "DOCUMENTO SE ENCUENTRA INVALIDADO".
+    const [_estadoInva] = await sequelize.query(
+      `select invalidado, selloRecibidoInva, codigoGeneracionInvalidacion,
+              convert(varchar, fechaHoraInva, 120) as fechaHoraInva
+         from dte.dbo.dtes where Dte_id = :id`,
+      { replacements: { id: datos[0].Dte_id }, type: QueryTypes.SELECT }
+    );
+    if (_estadoInva && Number(_estadoInva.invalidado) === 1) {
+      return res.send({
+        success: false,
+        errors: [
+          `El documento ${documento} ya fue invalidado` +
+            (_estadoInva.fechaHoraInva ? ` el ${_estadoInva.fechaHoraInva}` : "") +
+            (_estadoInva.selloRecibidoInva ? ` (sello ${_estadoInva.selloRecibidoInva})` : ""),
+        ],
+        yaInvalidado: true,
+      });
+    }
+
     const datosDte = await _receptor(datos[0].tipoDoc, datos[0].Dte_id);
     const _idDte = datosDte[0].dte_Id;
 
@@ -287,6 +307,29 @@ const postInvalidar = async (req, res) => {
           { type: QueryTypes.SELECT }
         );
         logger.info("Invalidacion rechazada", { controller: "invalidacion", action: "postInvalidar", extra: JSON.stringify(_respuestaMH) });
+
+        // 015: Hacienda ya lo tiene invalidado (p. ej. un intento anterior que no
+        // quedó registrado). Se marca en BD solo si no estaba, para no borrar el
+        // sello de la invalidación original.
+        const _yaInvalidadoMH =
+          _respuestaMH.codigoMsg === "015" ||
+          String(_respuestaMH.descripcionMsg || "").toUpperCase().includes("SE ENCUENTRA INVALIDADO");
+        if (_yaInvalidadoMH) {
+          await sequelize.query(
+            `update dte.dbo.dtes set invalidado = 1, estadoIvalidacion = 'INVALIDADO EN MH',
+                    fechaHoraInva = isnull(fechaHoraInva, getdate())
+              where Dte_id = :id and isnull(invalidado, 0) = 0`,
+            { replacements: { id: _idDte } }
+          );
+          res.send({
+            errors: [`El documento ${documento} ya se encuentra invalidado en Hacienda`],
+            result: _respuestaMH,
+            success: false,
+            yaInvalidado: true,
+          });
+          return;
+        }
+
         res.send({
           errors: ["Error al enviar Invalidacion"],
           result: _respuestaMH,

@@ -1,3 +1,9 @@
 {
-  "ignore": ["/storage/json/dte01/rechazados/*.json", "README"]
+  "ignore": [
+    "storage/**",
+    "backend/storage/**",
+    "logs/**",
+    "node_modules/**",
+    "README"
+  ]
 }
