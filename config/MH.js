@@ -13,11 +13,83 @@ const moment = require("moment");
 const { sequelize } = require("./mssql");
 const { QueryTypes } = require("sequelize");
 const { watch } = require("fs");
+const { validaDte } = require("../utils/validaDte");
+
+// ---------------------------------------------------------------------
+// Normativa DTE v2.0 (MH 2026). Cada empresa pasa a v2 cuando su columna
+// de versión en DTE.dbo.empresa llega a la versión nueva (Fase 6). Mientras
+// tanto se sigue armando el JSON v1 exactamente como antes.
+// ---------------------------------------------------------------------
+const VERSION_V2 = { "01": 2, "03": 4, "04": 4, "05": 4, "06": 4, "07": 2, "11": 3, "14": 2 };
+// Columna de versión que usa identificacion() para cada tipo (04 y 05 usan la de 03)
+const COLUMNA_VERSION = {
+  "01": "versionDte01",
+  "03": "versionDte03",
+  "04": "versionDte03",
+  "05": "versionDte03",
+  "06": "versionDte06",
+  "07": "versionDte07",
+  "11": "versionDte11",
+  "14": "versionDte14",
+};
+const esV2 = (empresa, tipoDte) => {
+  const fila = Array.isArray(empresa) ? empresa[0] : empresa;
+  const version = Number(fila?.[COLUMNA_VERSION[tipoDte]]);
+  return !!VERSION_V2[tipoDte] && version >= VERSION_V2[tipoDte];
+};
+
+// Dirección MH. En v2 lleva distrito (CAT-008) y los códigos nuevos de
+// municipio (CAT-013), que vienen de erpadmin.CLIENTE_CIA vía dte_Cliente
+// (DEPTO_MH, MUNI_MH, DISTRITO_MH). En v1 se mantiene ZONA como siempre.
+const direccionCliente = (cli, complemento, v2) => {
+  if (!v2) {
+    return {
+      departamento: cli.ZONA.substring(0, 2),
+      municipio: cli.ZONA.substring(2, 4),
+      complemento,
+    };
+  }
+  return {
+    departamento: cli.DEPTO_MH,
+    municipio: cli.MUNI_MH,
+    distrito: cli.DISTRITO_MH,
+    complemento,
+  };
+};
+
+const direccionEmpresa = (emp, v2) => {
+  const dir = {
+    departamento: emp.departamento,
+    municipio: emp.municipio,
+    complemento: emp.complementoDir,
+  };
+  if (v2) dir.distrito = emp.distrito;
+  return dir;
+};
+
+// En v2 el emisor de los DTE ya no lleva estos campos (sí los eventos)
+const quitarCamposEmisorV1 = (e) => {
+  delete e.tipoEstablecimiento;
+  delete e.codEstableMH;
+  delete e.codPuntoVentaMH;
+  return e;
+};
 const _ambiente = process.env.DTE_AMBIENTE;
 const _moneda = process.env.MONEDA;
 
 const firmaMH = async (datos, empresa) => {
   try {
+    // Validación local contra los esquemas MH v2 (ver utils/validaDte.js).
+    // En modo "log" solo registra; en modo "bloquear" no firma si falla.
+    const _validacion = validaDte(datos.dteJson, {
+      ref: datos.dteJson?.identificacion?.numeroControl,
+    });
+    if (
+      !_validacion.valido &&
+      (process.env.DTE_VALIDAR || "log").toLowerCase() === "bloquear"
+    ) {
+      return "ERROR";
+    }
     if (empresa[0].ambiente === "01") {
       const response = await fetch(
         `http://18.191.200.198:8114/firmardocumento/`,
@@ -198,11 +270,13 @@ const identificacion = async (_tipoDoc, _empresa, _factura) => {
       const _parte2 = _demoFa.substring(19, 34);
       _numeroC = _parte1 + "-" + _parte2;
     } else {
-      _demoFa;
+      // Número sin año intermedio: se usa tal cual (antes quedaba vacío)
+      _numeroC = _demoFa;
     }
 
     if (_tipoDoc === "11") {
-
+      // FEX v1 usaba "motivoContigencia"; FEX v3 usa "motivoContin" como los demás
+      const _motivo = esV2(datosEmpresa, "11") ? "motivoContin" : "motivoContigencia";
       const identificacion = {
         version: datosEmpresa[0].versionDte11,
         ambiente: datosEmpresa[0].ambiente,
@@ -213,7 +287,7 @@ const identificacion = async (_tipoDoc, _empresa, _factura) => {
         tipoModelo: 1,
         tipoOperacion: 1,
         tipoContingencia: null,
-        motivoContigencia: null,
+        [_motivo]: null,
         fecEmi: _fechaNueva,
         horEmi: _hora,
         tipoMoneda: process.env.MONEDA,
@@ -258,7 +332,8 @@ const identificacion = async (_tipoDoc, _empresa, _factura) => {
       return identificacion;
     } else if (_tipoDoc === "07") {
       const identificacion = {
-        version: datosEmpresa[0].VersionDte07,
+        // La columna es versionDte07 (con "V" mayúscula salía undefined)
+        version: datosEmpresa[0].versionDte07,
         ambiente: datosEmpresa[0].ambiente,
         tipoDte: _tipoDoc,
         //numeroControl: _factura,
@@ -312,7 +387,32 @@ const datosFac = async (factura, tipodoc, esquemaBD) => {
     return datosFactura;
   }
 };
+// Emisor según la versión del DTE de la empresa: v1 tal cual (emisorBase);
+// v2 sin tipoEstablecimiento/codEstableMH/codPuntoVentaMH y con distrito.
 const emisor = async (empresa, tipoDte) => {
+  const e = await emisorBase(empresa, tipoDte);
+  if (!e || !esV2(empresa, tipoDte)) return e;
+
+  quitarCamposEmisorV1(e);
+  e.direccion = direccionEmpresa(empresa[0], true);
+
+  if (tipoDte === "07") {
+    // CR v2 usa los mismos nombres que los demás DTE
+    e.codEstable = e.codigo;
+    e.codPuntoVenta = e.puntoVenta;
+    delete e.codigo;
+    delete e.puntoVenta;
+    delete e.codigoMH;
+    delete e.puntoVentaMH;
+  }
+  if (tipoDte === "11") {
+    // FEX v3: tipoRegimen (CAT-033) = prefijo del régimen, ej. "EX-1.1000.000" -> "EX-1"
+    e.tipoRegimen = e.regimen ? e.regimen.split(".")[0] : null;
+  }
+  return e;
+};
+
+const emisorBase = async (empresa, tipoDte) => {
   if (tipoDte === "03" || tipoDte === "01" || tipoDte === "04") {
     const emisor = {
       nit: empresa[0].nit,
@@ -426,7 +526,9 @@ const emisor = async (empresa, tipoDte) => {
     return emisor;
   }
 };
-const receptor = async (_factura, tipoDte, esquema) => {
+// empresa es opcional: sin ella se arma v1 (como antes).
+const receptor = async (_factura, tipoDte, esquema, empresa) => {
+  const v2 = empresa ? esV2(empresa, tipoDte) : false;
   const data = await SqlFactura(_factura, esquema);
   let cliente = "";
   if (data.length > 0) {
@@ -467,14 +569,23 @@ const receptor = async (_factura, tipoDte, esquema) => {
       codActividad: dataCliente[0].CODACT,
       descActividad: dataCliente[0].DESCACT,
       nombreComercial: dataCliente[0].ALIAS.replace("'", ""),
-      direccion: {
-        departamento: dataCliente[0].ZONA.substring(0, 2),
-        municipio: dataCliente[0].ZONA.substring(2, 4),
-        complemento: dataCliente[0].DIRECCION.replace("DETALLE:", ""),
-      },
+      direccion: direccionCliente(
+        dataCliente[0],
+        dataCliente[0].DIRECCION.replace("DETALLE:", ""),
+        v2
+      ),
       telefono: dataCliente[0].TELEFONO1.replace("-", ""),
       correo: _correo,
     };
+    if (v2 && tipoDte === "05") {
+      // NC v4: el receptor se identifica con tipo y número de documento (CAT-022), no con nit
+      const { nit, ...resto } = receptor;
+      return {
+        tipoDocumento: nit.length === 9 || nit.length === 14 ? "36" : "13",
+        numDocumento: nit,
+        ...resto,
+      };
+    }
     return receptor;
   }
   if (tipoDte === "11") {
@@ -555,11 +666,7 @@ const receptor = async (_factura, tipoDte, esquema) => {
       nombre: dataCliente[0].NOMBRE.replace("'", ""),
       codActividad: null,
       descActividad: null,
-      direccion: {
-        departamento: dataCliente[0].ZONA.substring(0, 2),
-        municipio: dataCliente[0].ZONA.substring(2, 4),
-        complemento: dataCliente[0].DIRECCION,
-      },
+      direccion: direccionCliente(dataCliente[0], dataCliente[0].DIRECCION, v2),
       telefono: _telefono,
       correo: _correo,
     };
@@ -601,11 +708,7 @@ const receptor = async (_factura, tipoDte, esquema) => {
       codActividad: dataCliente[0].CODACT,
       descActividad: dataCliente[0].DESCACT,
       nombreComercial: dataCliente[0].NOMBRE.replace("'", ""),
-      direccion: {
-        departamento: dataCliente[0].ZONA.substring(0, 2),
-        municipio: dataCliente[0].ZONA.substring(2, 4),
-        complemento: dataCliente[0].DIRECCION,
-      },
+      direccion: direccionCliente(dataCliente[0], dataCliente[0].DIRECCION, v2),
       telefono: _telefono,
       correo: _correo,
     };
@@ -654,11 +757,7 @@ const receptor = async (_factura, tipoDte, esquema) => {
       codActividad: dataCliente[0].CODACT,
       descActividad: dataCliente[0].DESCACT,
       nombreComercial: dataCliente[0].NOMBRE.replace("'", ""),
-      direccion: {
-        departamento: dataCliente[0].ZONA.substring(0, 2),
-        municipio: dataCliente[0].ZONA.substring(2, 4),
-        complemento: dataCliente[0].DIRECCION,
-      },
+      direccion: direccionCliente(dataCliente[0], dataCliente[0].DIRECCION, v2),
       telefono: _telefono,
       correo: _correo,
       bienTitulo: "01",
@@ -735,7 +834,8 @@ const apendice = async (_factura, tipo, subtipo, esquema) => {
         obse = apend3;
       }
       let _pedido;
-    if(apend7){
+    // Estaba invertido: con pedido mandaba "Nodefindo" y sin pedido, vacío
+    if(!apend7){
       _pedido="Nodefindo"
     }else
 	{
@@ -1019,4 +1119,6 @@ module.exports = {
   receptor,
   receptor07,
   apendice,
+  esV2,
+  VERSION_V2,
 };

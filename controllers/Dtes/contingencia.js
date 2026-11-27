@@ -18,7 +18,6 @@ const contingencia = async (req, res) => {
       empresa_id,
     } = req.body;
 
-    const dataDte = await SqlDte(documento);
     const empresa = await Sqlempresa(empresa_id);
 
     if (empresa.length == 0) {
@@ -26,6 +25,15 @@ const contingencia = async (req, res) => {
         .status(400)
         .send({ messaje: "Empresa No existe o no esta activa" });
     }
+    // Antes se buscaba sin empresa y nunca encontraba el DTE
+    const dataDte = await SqlDte(documento, empresa_id);
+    if (dataDte.length === 0) {
+      return res
+        .status(400)
+        .send({ messaje: "Documento no existe para esta empresa" });
+    }
+    // Normativa DTE v2.0: evento de contingencia v4
+    const _v4 = Number(empresa[0].versionConting) >= 4;
 
     const uuid = require("uuid");
     const _codigoGeneracion = uuid.v4().toUpperCase();
@@ -50,6 +58,11 @@ const contingencia = async (req, res) => {
       telefono: empresa[0].telefono,
       correo: empresa[0].correoDte,
     };
+    if (_v4) {
+      _identificacion.version = Number(empresa[0].versionConting);
+      _emisor.codEstableMH = empresa[0].codestableceMh || null;
+      _emisor.codPuntoVentaMH = empresa[0].codPuntoVentaMh || null;
+    }
 
     const _detalleDte = [
       {
@@ -63,7 +76,7 @@ const contingencia = async (req, res) => {
       fFin: Ffin,
       hInicio: Hinicio,
       hFin: Hfin,
-      tipoContingencia: tipoContingencia,
+      tipoContingencia: _v4 ? Number(tipoContingencia) : tipoContingencia,
       motivoContingencia: motivoContingencia,
     };
     const dte = {
@@ -72,23 +85,37 @@ const contingencia = async (req, res) => {
       detalleDTE: _detalleDte,
       motivo: _motivo,
     };
+    // Firma y autorización con los datos de la empresa (antes .env y sin
+    // empresa: firmaMH devolvía "ERROR" y autorizacionMh fallaba)
     const datafirma = {
-      nit: process.env.DTE_NIT,
+      nit: empresa[0].nit,
       activo: true,
-      passwordPri: process.env.DTE_PWD_PRIVADA,
+      passwordPri: empresa[0].pwdPrivado,
       dteJson: dte,
     };
 
-    const _firma = await firmaMH(datafirma);
-    const _auth = await autorizacionMh();
-    _token = _auth.token;
+    const _firma = await firmaMH(datafirma, empresa);
+    if (_firma === "ERROR") {
+      return res.send({
+        messaje: "Es Servidor de Firma no responde",
+        result: false,
+      });
+    }
+    const _auth = await autorizacionMh(empresa_id);
+    if (_auth === "ERROR" || !_auth?.token) {
+      return res.send({
+        messaje: "Problema con autenticacion de hacienda",
+        result: false,
+      });
+    }
+    const _token = _auth.token;
 
     var myHeaders = new Headers();
     myHeaders.append("Content-Type", "application/json");
     myHeaders.append("Authorization", _token);
 
     var raw = JSON.stringify({
-      nit: process.env.DTE_NIT,
+      nit: empresa[0].nit,
       documento: _firma,
     });
 
@@ -101,10 +128,12 @@ const contingencia = async (req, res) => {
 
     const postContingencia = async () => {
       try {
-        const response = await fetch(
-          "https://apitest.dtes.mh.gob.sv/fesv/contingencia",
-          requestOptions
-        );
+        // Antes iba siempre a pruebas, aun en producción
+        const url =
+          empresa[0].ambiente === "01"
+            ? "https://api.dtes.mh.gob.sv/fesv/contingencia"
+            : "https://apitest.dtes.mh.gob.sv/fesv/contingencia";
+        const response = await fetch(url, requestOptions);
         const data = await response.json();
         return data;
       } catch (error) {

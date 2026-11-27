@@ -224,6 +224,7 @@
           <div class="row-text"><span class="label">Actividad Económica:</span></div>
           <div class="row-text">{{products.actividadEmisor}}</div>
           <div class="row-text"><span class="label">Dirección:</span> {{products.direccionEmisor}}</div>
+          {{#if products.ubicacionEmisor}}<div class="row-text"><span class="label">Distrito:</span> {{products.ubicacionEmisor}}</div>{{/if}}
           <div class="row-text"><span class="label">Teléfono:</span> {{products.telefonoEmisor}}</div>
           <div class="row-text"><span class="label">Correo:</span> {{products.correoEmisor}}</div>
           <div class="row-text"><span class="label">Vendedor asignado:</span> {{products.vendedor}}</div>
@@ -236,6 +237,7 @@
           <div class="row-text"><span class="label">Actividad Económica:</span></div>
           <div class="row-text">{{products.descActividad}}</div>
           <div class="row-text"><span class="label">Dirección:</span> {{products.direccion_compl}}</div>
+          {{#if products.ubicacionReceptor}}<div class="row-text"><span class="label">Distrito:</span> {{products.ubicacionReceptor}}</div>{{/if}}
           <div class="row-text"><span class="label">Teléfono:</span> {{products.telefono}}</div>
           <div class="row-text"><span class="label">Correo:</span> {{products.correo}}</div>
           <div class="row-text"><span class="label">Código de cliente:</span> {{products.cliente}}</div>
@@ -300,6 +302,12 @@
           <div class="row-text">3. Pagos con cheque, favor elaborar a nombre de {{products.nombreEmisor}}</div>
           <div class="row-text">4. Todo cheque rechazado, generará un cargo administrativo de $25.00 más IVA.</div>
           <div class="row-text">5. Productos que hayan sido aceptados por ofertas especiales o por vencimiento corto no serán aceptados en devolución.</div>
+          {{#if products.observacionesPdf}}
+          <div class="row-text" style="margin-top: 3px;"><span class="label">OBSERVACIONES:</span> {{products.observacionesPdf}}</div>
+          {{/if}}
+          {{#each products.apendiceExtra}}
+          <div class="row-text"><span class="label">{{etiqueta}}:</span> {{valor}}</div>
+          {{/each}}
         </td>
 
         <td>

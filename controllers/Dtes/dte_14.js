@@ -7,7 +7,10 @@ const {
   receptor,
   firmaMH,
   autorizacionMh,
+  esV2,
+  VERSION_V2,
 } = require("../../config/MH");
+const { aV2 } = require("../../utils/dteV2");
 const logger = require("../../utils/logger");
 const { notifyError } = require("../../utils/errorNotifier");
 const {
@@ -70,10 +73,11 @@ const postDte14 = async (req, res) => {
     try {
       const _identificacion = await identificacion("14", _empresa, _form);
       const _emisior = await emisor(empresa, "14");
-      const _subjectoExcluido = await subjectoexculido(_form, "14");
+      const _v2 = esV2(empresa, "14");
+      const _subjectoExcluido = await subjectoexculido(_form, _v2);
       const _cuerpo = await cuerpoDoc(_form);
       const _resumen = await resumen(_form);
-      const dte = {
+      const dteV1 = {
         identificacion: _identificacion,
         emisor: _emisior,
         sujetoExcluido: _subjectoExcluido,
@@ -81,6 +85,8 @@ const postDte14 = async (req, res) => {
         resumen: _resumen,
         apendice: null,
       };
+      // DTE v2.0 (FSE v2): sujetoExcluido -> receptor, sin ivaRete
+      const dte = _v2 ? aV2(dteV1, "14") : dteV1;
 
       const datafirma = {
         nit: empresa[0].nit,
@@ -251,8 +257,17 @@ const postDte14 = async (req, res) => {
       observaciones: null,
     };
 
+    // DTE v2.0: se decide por la configuración actual de la empresa, así un
+    // documento guardado en v1 se reenvía como v2 después del cambio.
+    const _v2 = esV2(empresa, "14");
+    if (_v2) {
+      _ide.version = VERSION_V2["14"];
+      _emi.direccion.distrito = _emisor[0].direccion_dist;
+      _subj.direccion.distrito = _subjectoE[0].direccion_dist;
+    }
+
     //armamos el archivo veamos
-    const datos = {
+    const datosV1 = {
       identificacion: _ide,
       emisor: _emi,
       sujetoExcluido: _subj,
@@ -260,6 +275,7 @@ const postDte14 = async (req, res) => {
       resumen: _resumen,
       apendice: null,
     };
+    const datos = _v2 ? aV2(datosV1, "14") : datosV1;
   logger.debug("Debug datos", { controller: "dte_14", action: "postDte14" });
     //Creo la firma
 
@@ -277,7 +293,7 @@ const postDte14 = async (req, res) => {
     var raw = JSON.stringify({
       ambiente: process.env.DTE_AMBIENTE,
       idEnvio: 1,
-      version: _ident[0].version,
+      version: _ide.version,
       tipoDte: _ident[0].tipoDte,
       documento: _firma,
       codigoGeneracion: _ident[0].codigoGeneracion,
@@ -322,13 +338,9 @@ const postDte14 = async (req, res) => {
 	_empresa
     );
 
+    // El JSON entregado es el mismo que se firmó
     const JsonCliente = {
-      identificacion: _ide,
-      emisor: _emi,
-      subjectoExcluido: _subj,
-      cuerpoDocumento: _cuer,
-      resumen: _resumen,
-      apendice: null,
+      ...datos,
       respuestaMh: _respuestaMH,
     };
     if (
@@ -422,7 +434,8 @@ const postDte14 = async (req, res) => {
    }
  }
 };
-const subjectoexculido = async (_factura) => {
+// v2: el formulario debe enviar direccion.distrito (CAT-008)
+const subjectoexculido = async (_factura, v2 = false) => {
   let tipo = "";
   if (_factura.numDocumento.length > 9) {
     tipo = "36";
@@ -444,6 +457,7 @@ const subjectoexculido = async (_factura) => {
     telefono: _factura.telefono,
     correo: _factura.correo,
   };
+  if (v2) data.direccion.distrito = _factura.direccion.distrito;
   return data;
 };
 const cuerpoDoc = async (_factura) => {

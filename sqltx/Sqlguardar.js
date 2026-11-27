@@ -112,9 +112,14 @@ const guardarEmision = async (emisor, factura,empresa) => {
     codPuntoVenta = emisor.codPuntoVenta;
   }
 
+  // DTE v2: distrito (CAT-008). En v1 no viene y se guarda NULL.
+  const distrito = emisor.direccion?.distrito
+    ? `'${emisor.direccion.distrito}'`
+    : "NULL";
+
   try {
     await sequelize.query(
-      `insert into dte.dbo.emisor(dte_id,nit,nrc,nombre,codActividad,descActividad,nombreComercial,tipoEstablecimiento,direccion_depa,direccion_muni,direccion_compl,telefono,correo,codEstableMH,codEstable,codPuntoVentaMH,codPuntoVenta) values(${id[0].Dte_id},'${emisor.nit}','${emisor.nrc}','${emisor.nombre}','${emisor.codActividad}','${emisor.descActividad}',${nombreComercial},'${tipoEstablecimiento}','${emisor.direccion.departamento}','${emisor.direccion.municipio}','${emisor.direccion.complemento}','${emisor.telefono}','${emisor.correo}','${codEstableMH}','${codEstable}','${codPuntoVentaMH}','${codPuntoVenta}')`,
+      `insert into dte.dbo.emisor(dte_id,nit,nrc,nombre,codActividad,descActividad,nombreComercial,tipoEstablecimiento,direccion_depa,direccion_muni,direccion_compl,telefono,correo,codEstableMH,codEstable,codPuntoVentaMH,codPuntoVenta,direccion_dist) values(${id[0].Dte_id},'${emisor.nit}','${emisor.nrc}','${emisor.nombre}','${emisor.codActividad}','${emisor.descActividad}',${nombreComercial},'${tipoEstablecimiento}','${emisor.direccion.departamento}','${emisor.direccion.municipio}','${emisor.direccion.complemento}','${emisor.telefono}','${emisor.correo}','${codEstableMH}','${codEstable}','${codPuntoVentaMH}','${codPuntoVenta}',${distrito})`,
       { type: QueryTypes.SELECT }
     );
   } catch (error) {
@@ -162,9 +167,14 @@ const guardarReceptor = async (receptor, factura,empresa) => {
     nombreComercial = receptor.nombreComercial;
   }
 
+  // DTE v2: distrito (CAT-008). En v1 no viene y se guarda NULL.
+  const distrito = receptor.direccion?.distrito
+    ? `'${receptor.direccion.distrito}'`
+    : "NULL";
+
   try {
     await sequelize.query(
-      `insert into dte.dbo.receptor(dte_id,nit,nrc,nombre,codActividad,descActividad,nombreComercial,direccion_depa,direccion_muni,direccion_compl,telefono,correo) values (${id[0].Dte_id},'${nit}','${nrc}','${receptor.nombre}','${codActividad}','${receptor.descActividad}','${nombreComercial}','${departamento}','${municipio}','${complemento}','${receptor.telefono}','${receptor.correo}')`,
+      `insert into dte.dbo.receptor(dte_id,nit,nrc,nombre,codActividad,descActividad,nombreComercial,direccion_depa,direccion_muni,direccion_compl,telefono,correo,direccion_dist) values (${id[0].Dte_id},'${nit}','${nrc}','${receptor.nombre}','${codActividad}','${receptor.descActividad}','${nombreComercial}','${departamento}','${municipio}','${complemento}','${receptor.telefono}','${receptor.correo}',${distrito})`,
       { type: QueryTypes.SELECT }
     );
   } catch (error) {
@@ -212,9 +222,14 @@ const guardarSubjectoExcluido = async (receptor, factura,empresa) => {
     nombreComercial = receptor.nombreComercial;
   }
 
+  // DTE v2: distrito (CAT-008). En v1 no viene y se guarda NULL.
+  const distrito = receptor.direccion?.distrito
+    ? `'${receptor.direccion.distrito}'`
+    : "NULL";
+
   try {
     await sequelize.query(
-      `insert into dte.dbo.subjetoExcluido(dte_id,tipoDocumento,nit,nombre,codActividad,descActividad,direccion_depa,direccion_muni,direccion_compl,telefono,correo) values (${id[0].Dte_id},'${receptor.tipoDocumento}', '${nit}','${receptor.nombre}','${codActividad}','${receptor.descActividad}','${departamento}','${municipio}','${complemento}','${receptor.telefono}','${receptor.correo}')`,
+      `insert into dte.dbo.subjetoExcluido(dte_id,tipoDocumento,nit,nombre,codActividad,descActividad,direccion_depa,direccion_muni,direccion_compl,telefono,correo,direccion_dist) values (${id[0].Dte_id},'${receptor.tipoDocumento}', '${nit}','${receptor.nombre}','${codActividad}','${receptor.descActividad}','${departamento}','${municipio}','${complemento}','${receptor.telefono}','${receptor.correo}',${distrito})`,
       { type: QueryTypes.SELECT }
     );
   } catch (error) {

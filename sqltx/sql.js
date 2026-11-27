@@ -3,7 +3,7 @@ const { sequelize } = require("../config/mssql");
 
 const Sqlempresa = async (empresa) => {
   return await sequelize.query(
-    `SELECT  Empresa_id,nombre,nit,replace(nrc,'-','') as nrc,codActividad,desActividad,nombreComercial,tipoestablecimiento,departamento,municipio,complementoDir,telefono,correoDte,codestableceMh,codestable,codPuntoVentaMh,codPuntoVenta,userApi,pwdApi,pwdPrivado,pwdPublica,ambiente,versionDte01,versionDte03,versionDte05,versionDte06,versionDte07,versionDte08,versionDte09,versionDte11,versionDte14,versionDte15,activa,jwtSecret,emailEnvioDte,emailEnvioDtePass,tokenUser,fechaHoraToken,versionInva,versionConting,Contingencia,esquemaBD, urlLogo,logoUrl,formato FROM DTE.dbo.empresa where empresa_id=${empresa} and activa=1`,
+    `SELECT  Empresa_id,nombre,nit,replace(nrc,'-','') as nrc,codActividad,desActividad,nombreComercial,tipoestablecimiento,departamento,municipio,complementoDir,telefono,correoDte,codestableceMh,codestable,codPuntoVentaMh,codPuntoVenta,userApi,pwdApi,pwdPrivado,pwdPublica,ambiente,versionDte01,versionDte03,versionDte05,versionDte06,versionDte07,versionDte08,versionDte09,versionDte11,versionDte14,versionDte15,activa,jwtSecret,emailEnvioDte,emailEnvioDtePass,tokenUser,fechaHoraToken,versionInva,versionConting,Contingencia,esquemaBD, urlLogo,logoUrl,formato,distrito FROM DTE.dbo.empresa where empresa_id=${empresa} and activa=1`,
     { type: QueryTypes.SELECT }
   );
 };
