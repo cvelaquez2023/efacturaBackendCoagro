@@ -13,7 +13,7 @@ const {
   esV2,
 } = require("../../config/MH");
 const { aV2 } = require("../../utils/dteV2");
-const { emailRechazo, emailEnviado } = require("../../utils/email");
+const { emailRechazo, emailEnviado, emailContingencia } = require("../../utils/email");
 const fs = require("fs");
 const path = require("path");
 const { transporter } = require("../../config/mailer");
@@ -435,7 +435,8 @@ const postDte01 = async (req, res) => {
     const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
     fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
-    await emailEnviado(
+    // Antes llamaba a emailEnviado con argumentos que no corresponden
+    await emailContingencia(
       _identificacion.numeroControl,
       _receptor.correo,
       "dte01",
