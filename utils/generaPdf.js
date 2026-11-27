@@ -86,18 +86,21 @@ const generaPdf = async (datos, _ano, empresa_id) => {
   );
   const _idDte = _dte[0].Dte_Id;
   // detalle de dte Cuerpo
+  // ARTICULO y lote van con LEFT JOIN: las líneas de servicio (sin lote) también se imprimen.
+  // Sin lote se usa la descripción guardada en cuerpoDocumento (la del servicio) en lugar
+  // del nombre genérico del artículo.
   const _dteCuerpo = await sequelize.query(
-    `SELECT fl.bodega, art.articulo as articulo , art.DESCRIPCION as nombre, cu.cantidad, cu.precioUni, cu.montoDescu,
+    `SELECT fl.bodega, COALESCE(art.articulo, cu.codigo) as articulo,
+     CASE WHEN lo.LOTE IS NULL THEN cu.descripcion ELSE COALESCE(art.DESCRIPCION, cu.descripcion) END as nombre,
+     cu.cantidad, cu.precioUni, cu.montoDescu,
      fl.PORC_DESC_LIN as porDesc, cu.ventaNoSuj + cu.ventaExenta + cu.ventaGravada as totalLinea,
-     fl.lote, CONVERT(varchar, lo.FECHA_VENCIMIENTO, 105) as fechaVence
-     FROM dte.dbo.cuerpoDocumento cu,
-     dte.dbo.dtes dte,
-     COAGRO2.${empresa[0].esquemaBD}.factura_Linea fl,
-     COAGRO2.${empresa[0].esquemaBD}.ARTICULO art,
-     COAGRO2.${empresa[0].esquemaBD}.lote lo
-     WHERE cu.dte_id=${_idDte} AND cu.dte_Id=dte.Dte_Id AND dte.Dte=fl.factura
-     AND cu.numItem=fl.LINEA + 1 AND fl.articulo=art.articulo
-     AND fl.articulo=lo.articulo AND fl.lote=lo.LOTE
+     lo.LOTE as lote, CONVERT(varchar, lo.FECHA_VENCIMIENTO, 105) as fechaVence
+     FROM dte.dbo.cuerpoDocumento cu
+     JOIN dte.dbo.dtes dte ON cu.dte_Id=dte.Dte_Id
+     JOIN COAGRO2.${empresa[0].esquemaBD}.factura_Linea fl ON dte.Dte=fl.factura AND cu.numItem=fl.LINEA + 1
+     LEFT JOIN COAGRO2.${empresa[0].esquemaBD}.ARTICULO art ON fl.articulo=art.articulo
+     LEFT JOIN COAGRO2.${empresa[0].esquemaBD}.lote lo ON fl.articulo=lo.articulo AND fl.lote=lo.LOTE
+     WHERE cu.dte_id=${_idDte}
      ORDER BY cu.numItem
     `,
     { type: QueryTypes.SELECT },
@@ -214,7 +217,10 @@ const generaPdf = async (datos, _ano, empresa_id) => {
       numItem: i + 1,
       codigo: l.articulo || "",
       cantidad: cantidad.toFixed(0),
-      descripcion: l.nombre,
+      // Sin lote (servicios): quita el sufijo " LOTE:... FECHA_VENCE:..." de documentos ya emitidos.
+      descripcion: l.lote
+        ? l.nombre
+        : String(l.nombre || "").replace(/\s*LOTE:.*$/, "").trim(),
       precioUni: fmt(precioUni),
       porDesc: porDesc.toFixed(0),
       precioDescuento: fmt(precioDesc),

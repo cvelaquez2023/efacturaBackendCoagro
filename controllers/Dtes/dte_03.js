@@ -47,6 +47,17 @@ const {
 const generaPdf = require("../../utils/generaPdf");
 const { generaPdfTicket } = require("../../utils/pdfMakeTicket");
 const { resourceLimits } = require("worker_threads");
+
+/**
+ * Descripción de la línea para el DTE. Solo agrega LOTE y FECHA_VENCE cuando la
+ * línea tiene lote; los servicios (sin lote) quedan con su descripción limpia.
+ */
+const descripcionLinea = (element) => {
+  const descripcion = String(element.DESCRIPCION ?? "").trim();
+  const lote = String(element.LOTE ?? "").trim();
+  if (!lote) return descripcion;
+  return descripcion + " LOTE:" + lote + " FECHA_VENCE:" + element.FECHAVENCE;
+};
 //Credito Fiscal
 const postDte03 = async (req, res) => {
  try {
@@ -621,12 +632,7 @@ try {
           numeroDocumento: null,
           codigo: element.ARTICULO,
           codTributo: null,
-          descripcion:
-            element.DESCRIPCION +
-            " LOTE:" +
-            element.LOTE +
-            " FECHA_VENCE:" +
-            element.FECHAVENCE,
+          descripcion: descripcionLinea(element),
           cantidad: element.CANTIDAD,
           uniMedida: 59,
           precioUni: precio,
@@ -831,12 +837,7 @@ else {
           numeroDocumento: null,
           codigo: element.ARTICULO,
           codTributo: null,
-          descripcion:
-            element.DESCRIPCION +
-            " LOTE:" +
-            element.LOTE +
-            " FECHA_VENCE:" +
-            element.FECHAVENCE,
+          descripcion: descripcionLinea(element),
           cantidad: element.CANTIDAD,
           uniMedida: 59,
           precioUni: precio,
@@ -899,12 +900,7 @@ else {
       numeroDocumento: null,
       codigo: element.ARTICULO,
       codTributo: null,
-      descripcion:
-        element.DESCRIPCION +
-        " LOTE:" +
-        element.LOTE +
-        " FECHA_VENCE:" +
-        element.FECHAVENCE,
+      descripcion: descripcionLinea(element),
       cantidad: element.CANTIDAD,
       uniMedida: 59,
       precioUni: precio,

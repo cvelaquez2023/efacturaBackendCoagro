@@ -187,8 +187,36 @@ const SqlProveedor = async (contribuyente,esquema) => {
     }
   );
 };
+/**
+ * Busca proveedores del ERP por código, nombre, alias o contribuyente (DUI/NIT).
+ * El texto va como parámetro (replacements), nunca concatenado. El esquema viene de
+ * DTE.dbo.empresa y se valida antes de usarlo como nombre de esquema.
+ */
+const SqlBuscarProveedores = async (texto, esquema, limite) => {
+  if (!/^[A-Za-z0-9_]+$/.test(String(esquema || ""))) {
+    throw new Error("Esquema de empresa no valido");
+  }
+  return await sequelize.query(
+    `SELECT TOP (${Number(limite) || 30})
+            RTRIM(PROVEEDOR) AS PROVEEDOR, RTRIM(NOMBRE) AS NOMBRE, RTRIM(ALIAS) AS ALIAS,
+            RTRIM(CONTRIBUYENTE) AS CONTRIBUYENTE, ACTIVO
+       FROM ${esquema}.PROVEEDOR
+      WHERE (:texto = ''
+         OR PROVEEDOR LIKE :patron
+         OR NOMBRE LIKE :patron
+         OR ALIAS LIKE :patron
+         OR CONTRIBUYENTE LIKE :patron)
+      ORDER BY NOMBRE`,
+    {
+      replacements: { texto, patron: `%${texto}%` },
+      type: QueryTypes.SELECT,
+    }
+  );
+};
+
 module.exports = {
   Sqlempresa,
+  SqlBuscarProveedores,
   SqlFactura,
   SqlCliente,
   SqlFacturaLinea,
