@@ -12,8 +12,12 @@
 // ruta que no es de la handheld (COD_ZON de PEN_COB / HIST_FAC), responde "No existe el recibo X en
 // tus rutas", sin revelar que existe.
 //
-// La app hace un recibo por documento pagado: una pagina por cada linea de alCXC_DET_DEP del
-// deposito. Con ?numDoc solo sale la pagina de ese documento.
+// Varias cuentas: si el cliente abona a mas de un banco (p. ej. transferencia al Agricola y deposito
+// al Hipotecario), la app manda un deposito por cuenta con el MISMO NUM_DEP. Aqui se juntan: pidiendo
+// cualquiera de las partes (CONSEC_DEP o ctaBco) sale el recibo completo, con todas las cuentas.
+//
+// La app hace un recibo por documento pagado: una pagina por documento, con lo pagado en todas las
+// cuentas del recibo. Con ?numDoc solo sale la pagina de ese documento.
 //
 // Tablas:
 //   - erpadmin.alCXC_ENC_DEP      -> encabezado (CONSEC_DEP; NUM_DEP = numero de recibo)
@@ -29,8 +33,9 @@
 //    sin agente, la ruta.
 //  - Saldo anterior / pendiente: la app los guarda en el telefono, no en el servidor. Se reconstruyen
 //    como hace la app con los recibos pendientes: saldo actual en PEN_COB (SALDO_DOLAR o SALDO_LOCAL
-//    segun IND_MON del recibo) menos los recibos pendientes ANTERIORES (CONSEC_DEP menor) del mismo
-//    documento. Solo si el recibo sigue pendiente (DOC_PRO 'N') y el documento esta en PEN_COB; si
+//    segun IND_MON del recibo) menos los recibos pendientes ANTERIORES del mismo documento (los que
+//    tienen su primera parte con CONSEC_DEP menor; las otras partes de ESTE recibo no son anteriores:
+//    se suman a lo pagado). Solo si todas las partes siguen pendientes (DOC_PRO 'N') y el documento esta en PEN_COB; si
 //    control ya lo aplico, PEN_COB ya refleja este y otros pagos y no se puede saber: van null (no
 //    salen esas filas y el estado queda ABONO, igual que la plantilla sin saldos).
 //
@@ -41,7 +46,7 @@ const path = require("path");
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
 const { generatePdfWithPuppeteer } = require("../../utils/generaPdf");
-const { htmlRecibo, reciboDesdeServidor } = require("../../utils/reciboHtml");
+const { htmlRecibo, reciboDesdeServidor, formasDeLinea } = require("../../utils/reciboHtml");
 
 const LOGO = path.join(__dirname, "../../template/logo.jpeg");
 // Margenes del @page de la plantilla (16mm 12mm): generatePdfWithPuppeteer trae otros por defecto.
@@ -58,6 +63,8 @@ const error = (res, mensaje) => res.send({ result: {}, success: false, errors: [
 const pagado = (alias) =>
   `ISNULL(${alias}.MON_EFE, 0) + ISNULL(${alias}.MON_CHE, 0) + ISNULL(${alias}.MON_DEP, 0) + ISNULL(${alias}.MON_TRA, 0)`;
 
+// Un recibo abonado a varias cuentas se guarda como un deposito por cuenta, todos con el mismo
+// NUM_DEP (y COD_CIA): son las "partes" del recibo. Se buscan todas a partir de cualquiera de ellas.
 const buscarRecibo = async (consecDep, numDoc) => {
   const [encabezado] = await sequelize.query(
     `SELECT E.CONSEC_DEP, LTRIM(RTRIM(E.NUM_DEP)) AS NUM_DEP, LTRIM(RTRIM(E.COD_CIA)) AS COD_CIA,
@@ -72,9 +79,20 @@ const buscarRecibo = async (consecDep, numDoc) => {
   );
   if (!encabezado) return null;
 
+  const partes = await sequelize.query(
+    `SELECT E.CONSEC_DEP, LTRIM(RTRIM(E.CTA_BCO)) AS CTA_BCO, LTRIM(RTRIM(C.NOM_CTA)) AS NOM_CTA,
+            ISNULL(LTRIM(RTRIM(E.DOC_PRO)), 'N') AS DOC_PRO
+       FROM COAGRO2.erpadmin.alCXC_ENC_DEP E
+       LEFT JOIN COAGRO2.erpadmin.alCXC_CTA_BCO C
+         ON C.COD_CIA = E.COD_CIA AND C.COD_BCO = E.COD_BCO AND C.CTA_BCO = E.CTA_BCO
+      WHERE E.NUM_DEP = :numDep AND E.COD_CIA = :codCia
+      ORDER BY E.CONSEC_DEP`,
+    { replacements: { numDep: encabezado.NUM_DEP, codCia: encabezado.COD_CIA }, type: QueryTypes.SELECT }
+  );
+
   const lineas = await sequelize.query(
-    `SELECT LTRIM(RTRIM(D.NUM_DOC)) AS NUM_DOC, D.MON_EFE, D.MON_CHE, D.MON_TRA, D.MON_DEP,
-            LTRIM(RTRIM(D.REF)) AS REF,
+    `SELECT LTRIM(RTRIM(D.CTA_BCO)) AS CTA_BCO, LTRIM(RTRIM(D.NUM_DOC)) AS NUM_DOC,
+            D.MON_EFE, D.MON_CHE, D.MON_TRA, D.MON_DEP, LTRIM(RTRIM(D.REF)) AS REF,
             LTRIM(RTRIM(COALESCE(P.COD_CLT, F.COD_CLT))) AS COD_CLT, LTRIM(RTRIM(CL.NOM_CLT)) AS NOM_CLT,
             LTRIM(RTRIM(COALESCE(P.COD_ZON, F.COD_ZON))) AS COD_ZON,
             LTRIM(RTRIM(A.AGENTE)) AS AGENTE, LTRIM(RTRIM(A.NOMBRE)) AS NOMBRE_AGENTE,
@@ -96,45 +114,89 @@ const buscarRecibo = async (consecDep, numDoc) => {
                       LEFT JOIN COAGRO2.erpadmin.AGENTE_ASOC_RT AA ON AA.CODIGO = RA.AGENTE
                       LEFT JOIN COAGRO2.erpadmin.AGENTE_RT AR ON AR.AGENTE = AA.AGENTE
                      WHERE RA.RUTA = COALESCE(P.COD_ZON, F.COD_ZON) AND RA.ACTIVA = 'S') A
-       -- Recibos pendientes anteriores a este del mismo documento (la app ya los desconto del saldo).
+       -- Recibos pendientes ANTERIORES a este del mismo documento (la app ya los desconto del saldo).
+       -- Las otras partes de este recibo no cuentan. Un recibo es anterior si su primera parte
+       -- (MIN CONSEC_DEP) es anterior a la primera de este: asi no importa si alguna parte se reenvio
+       -- despues.
        OUTER APPLY (SELECT SUM(${pagado("D2")}) AS PREVIO
                       FROM COAGRO2.erpadmin.alCXC_DET_DEP D2
                       JOIN COAGRO2.erpadmin.alCXC_ENC_DEP E2 ON E2.NUM_DEP = D2.NUM_DEP AND E2.CTA_BCO = D2.CTA_BCO
                      WHERE D2.NUM_DOC = D.NUM_DOC AND ISNULL(E2.DOC_PRO, 'N') = 'N'
-                       AND E2.CONSEC_DEP < :consecDep) X
-      WHERE D.NUM_DEP = :numDep AND D.CTA_BCO = :ctaBco
+                       AND NOT (E2.NUM_DEP = :numDep AND E2.COD_CIA = :codCia)
+                       AND (SELECT MIN(E3.CONSEC_DEP) FROM COAGRO2.erpadmin.alCXC_ENC_DEP E3
+                             WHERE E3.NUM_DEP = E2.NUM_DEP AND E3.COD_CIA = E2.COD_CIA) < :primerConsec) X
+      WHERE D.NUM_DEP = :numDep AND D.CTA_BCO IN (:ctas)
         ${numDoc ? "AND D.NUM_DOC = :numDoc" : ""}
       ORDER BY D.NUM_DOC`,
     {
       replacements: {
-        consecDep,
         numDoc,
         numDep: encabezado.NUM_DEP,
-        ctaBco: encabezado.CTA_BCO,
+        ctas: partes.map((p) => p.CTA_BCO),
         codCia: encabezado.COD_CIA,
+        primerConsec: partes[0].CONSEC_DEP,
         indMon: encabezado.IND_MON === "D" ? "D" : "L",
       },
       type: QueryTypes.SELECT,
     }
   );
-  return { encabezado, lineas };
+
+  // Una entrada por documento con sus lineas de cada cuenta, en el orden de las partes.
+  const orden = new Map(partes.map((p, i) => [p.CTA_BCO, i]));
+  const documentos = new Map();
+  for (const l of lineas) {
+    if (!documentos.has(l.NUM_DOC)) documentos.set(l.NUM_DOC, []);
+    documentos.get(l.NUM_DOC).push(l);
+  }
+  for (const ls of documentos.values()) ls.sort((a, b) => orden.get(a.CTA_BCO) - orden.get(b.CTA_BCO));
+
+  return { encabezado, partes, lineas, documentos: [...documentos.values()] };
 };
 
-const reciboDeLinea = (enc, l) => {
-  const conSaldo = enc.DOC_PRO === "N" && l.SALDO_ACTUAL !== null && l.SALDO_ACTUAL !== undefined;
-  const monto = Number(l.MON_EFE || 0) + Number(l.MON_CHE || 0) + Number(l.MON_TRA || 0) + Number(l.MON_DEP || 0);
-  const saldoAnterior = conSaldo
-    ? Math.round((Number(l.SALDO_ACTUAL) - Number(l.PAGOS_PENDIENTES_PREVIOS)) * 100) / 100
-    : null;
-  return reciboDesdeServidor(enc, l, {
+const totalLinea = (l) =>
+  Number(l.MON_EFE || 0) + Number(l.MON_CHE || 0) + Number(l.MON_TRA || 0) + Number(l.MON_DEP || 0);
+const redondear = (n) => Math.round(n * 100) / 100;
+
+// Recibo (objeto de utils/reciboHtml.js) de un documento. lineasDoc: sus lineas de alCXC_DET_DEP, una
+// por cuenta. Con varias cuentas se suman las formas de pago de todas, cada una con su cuenta, y la
+// plantilla las lista en "Cuenta" (r.cuentas).
+const reciboDeDocumento = (recibo, lineasDoc) => {
+  const enc = recibo.encabezado;
+  const [l] = lineasDoc;
+  const parte = (cta) => recibo.partes.find((p) => p.CTA_BCO === cta) || {};
+  const nombreCuenta = (cta) => texto(parte(cta).NOM_CTA);
+  const varias = lineasDoc.length > 1;
+
+  const formas = lineasDoc.flatMap((x) =>
+    formasDeLinea(x).map((f) => (varias ? { ...f, cuentaDeposito: nombreCuenta(x.CTA_BCO) || x.CTA_BCO } : f))
+  );
+  const monto = redondear(lineasDoc.reduce((s, x) => s + totalLinea(x), 0));
+
+  // Saldos solo si ninguna parte la aplico control todavia.
+  const conSaldo =
+    recibo.partes.every((p) => p.DOC_PRO === "N") && l.SALDO_ACTUAL !== null && l.SALDO_ACTUAL !== undefined;
+  const saldoAnterior = conSaldo ? redondear(Number(l.SALDO_ACTUAL) - Number(l.PAGOS_PENDIENTES_PREVIOS)) : null;
+
+  const r = reciboDesdeServidor({ ...enc, CTA_BCO: l.CTA_BCO }, l, {
     cliente: texto(l.COD_CLT),
     nombreCliente: texto(l.NOM_CLT) || texto(l.COD_CLT),
     tecnico: texto(l.AGENTE) || texto(l.COD_ZON),
     nombreTecnico: texto(l.NOMBRE_AGENTE),
-    nombreCuenta: texto(enc.NOM_CTA),
+    nombreCuenta: nombreCuenta(l.CTA_BCO),
     saldoAnterior,
-    saldoNuevo: conSaldo ? Math.round((saldoAnterior - monto) * 100) / 100 : null,
+    saldoNuevo: conSaldo ? redondear(saldoAnterior - monto) : null,
   });
+  if (!varias) return r;
+  return {
+    ...r,
+    formas,
+    monto,
+    cuentas: lineasDoc.map((x) => ({
+      cuenta: x.CTA_BCO,
+      nombreCuenta: nombreCuenta(x.CTA_BCO),
+      monto: redondear(totalLinea(x)),
+    })),
+  };
 };
 
 // htmlRecibo devuelve un documento completo; con varias lineas se usa el <head> (estilos) del
@@ -151,7 +213,7 @@ const unirPaginas = (htmls) => {
 // Arma el PDF (una pagina por linea) y lo responde inline. Comun a la web y a la app.
 const enviarPdfRecibo = async (res, recibo, numDoc) => {
   const opciones = { logo: logoBase64() };
-  const html = unirPaginas(recibo.lineas.map((l) => htmlRecibo(reciboDeLinea(recibo.encabezado, l), opciones)));
+  const html = unirPaginas(recibo.documentos.map((ls) => htmlRecibo(reciboDeDocumento(recibo, ls), opciones)));
   const pdf = await generatePdfWithPuppeteer(html, undefined, MARGENES);
 
   const nombre = `Recibo_${recibo.encabezado.NUM_DEP}${numDoc ? `_${numDoc}` : ""}.pdf`;
@@ -184,7 +246,8 @@ const getReciboPdf = async (req, res) => {
 
 // GET /fr/mobile/recibo/:numDep/pdf[?ctaBco=...&numDoc=...]
 // La app no conoce CONSEC_DEP (IDENTITY del servidor): se busca por NUM_DEP (+ CTA_BCO si viene;
-// sin ella y con varios, el mayor CONSEC_DEP). Solo recibos de las rutas de la handheld: si alguna
+// sin ella y con varios, el mayor CONSEC_DEP; con varias cuentas del mismo recibo cualquiera da el
+// recibo completo). Solo recibos de las rutas de la handheld: si alguna
 // linea es de otra ruta (o no se sabe de cual) responde igual que si no existiera.
 const getReciboPdfMovil = async (req, res) => {
   try {
@@ -216,4 +279,4 @@ const getReciboPdfMovil = async (req, res) => {
   }
 };
 
-module.exports = { getReciboPdf, getReciboPdfMovil, reciboDeLinea, unirPaginas };
+module.exports = { getReciboPdf, getReciboPdfMovil, reciboDeDocumento, unirPaginas };

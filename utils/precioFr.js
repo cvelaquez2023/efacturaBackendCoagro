@@ -11,7 +11,10 @@
  *   -> si ninguna regla baja el precio base, se queda el precio base.
  *
  * Bonificaciones (promocion TIPO B) no cambian el precio: se devuelven aparte
- * en `bonificaciones` si el producto y la cantidad minima aplican.
+ * en `bonificaciones` si el producto y la cantidad minima aplican. Son PROPORCIONALES y por
+ * producto: veces = floor(cantidad / CANTIDAD_MIN) y se regala CANTIDAD * veces de cada articulo
+ * de FR_PROMOCION_BONIFICADO (`p.bonificados`, uno o varios).
+ *   { promocionId, titulo, porCada, veces, articulos: [{ articulo, cantidadPorVez, cantidad }] }
  *
  * Alcance de un producto (ALCANCE/VALOR):
  *   A = codigo de articulo exacto
@@ -140,12 +143,21 @@ const calcularPrecio = ({
       } else if (tipo === "P" && num(prod.PRECIO_ESPECIAL) !== null) {
         agregar("PROMOCION", p.ID, `${p.TITULO}: precio especial`, num(prod.PRECIO_ESPECIAL));
       } else if (tipo === "B") {
+        // Proporcional y por producto: por cada CANTIDAD_MIN unidades de ESTE articulo se regala
+        // CANTIDAD de cada articulo de FR_PROMOCION_BONIFICADO (uno o varios).
+        const porCada = num(prod.CANTIDAD_MIN);
+        const veces = porCada ? Math.floor(cantidad / porCada) : 0;
+        if (veces < 1) break;
         bonificaciones.push({
           promocionId: p.ID,
           titulo: p.TITULO,
-          cantidadMin: num(prod.CANTIDAD_MIN),
-          articuloBonificado: p.ARTICULO_BONIFICADO,
-          cantidadBonificada: num(p.CANTIDAD_BONIFICADA),
+          porCada,
+          veces,
+          articulos: (p.bonificados || []).map((b) => ({
+            articulo: txt(b.ARTICULO),
+            cantidadPorVez: num(b.CANTIDAD),
+            cantidad: num(b.CANTIDAD) * veces,
+          })),
         });
         break; // una bonificacion por promocion aunque varios productos coincidan
       }
@@ -235,7 +247,7 @@ const obtenerPrecioVigente = async ({
   const promociones = (
     await frPromocionModel.findAll({
       where: { ...vigenteWhere, FECHA_FIN: { [Op.gte]: fecha } },
-      include: [{ association: "productos" }, { association: "destinos" }],
+      include: [{ association: "productos" }, { association: "destinos" }, { association: "bonificados" }],
     })
   ).map((p) => p.get({ plain: true }));
 

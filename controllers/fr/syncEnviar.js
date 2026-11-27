@@ -9,9 +9,13 @@
 //   - alFAC_ENC_PED      <- pedidos[].encabezado (llave COD_CIA + COD_ZON + NUM_PED)
 //   - alFAC_DET_PED      <- pedidos[].lineas     (se unen al encabezado por COD_CIA + NUM_PED)
 //   - alFAC_ENC_PED/DET  <- aprobaciones  (cotizacion ya enviada: TIP_DOC 'C' -> 'F')
+//   - alFAC_ENC_DEV      <- notasCredito[].encabezado (llave COD_CIA + COD_ZON + NUM_DEV)
+//   - alFAC_DET_DEV      <- notasCredito[].lineas     (misma llave + COD_ART, IND_DEV, LOTE_HIST, LOTE, ART_BON)
+//   - alFAC_ENC_INV      <- inventarios[].encabezado (llave COD_CIA + COD_ZON + NUM_INV)
+//   - alFAC_DET_INV      <- inventarios[].lineas     (misma llave + COD_ART)
 //   - alCXC_ENC_DEP      <- depositos[].encabezado (llave COD_CIA + COD_BCO + CTA_BCO + NUM_DEP)
 //   - alCXC_DET_DEP      <- depositos[].lineas     (se unen al encabezado por NUM_DEP + CTA_BCO)
-//   - RUTA_CONSECUT_RT   <- consecutivos  (PEDIDO y/o FACTURA de la ruta, solo si avanzan)
+//   - RUTA_CONSECUT_RT   <- consecutivos  (PEDIDO, FACTURA, RECIBO, NOTACREDITO y/o INVENTARIO de la ruta, solo si avanzan)
 //   - PROMOCIONALES_RT   <- promocionales (llave HANDHELD + CLIENTE + FECHA_SOLICITUD; ver procesarPromocional)
 //   - cliente / CLIENTE_CIA / RUTA_CLIENTE <- cambiosCliente (datos del cliente editados en la app;
 //                                             ver procesarCambioCliente y CAMPOS_CAMBIO_CLIENTE)
@@ -23,12 +27,16 @@
 //                   ubicacion: { LATITUD, LONGITUD, ALTITUD, TIEMPO_GPS, TIEMPO_PDA } | null }],
 //   pedidos:     [{ encabezado: { COD_CIA, COD_ZON, COD_CLT, NUM_PED, ... }, lineas: [{ NUM_LN, COD_ART, ... }] }],
 //   aprobaciones: [{ COD_CIA, COD_ZON, NUM_PED, FEC_PED, FEC_DES? }],   // cotizaciones que el vendedor aprobo
-//   depositos:   [{ encabezado: { COD_CIA, COD_BCO, CTA_BCO, NUM_DEP, MON_DEP, FEC_DEP, IND_MON, NOTAS?, DOC_PRO? },
+//   notasCredito: [{ encabezado: { COD_CIA, COD_ZON, COD_CLT, NUM_DEV, HOR_INI, HOR_FIN, FEC_DEV, ... },
+//                    lineas: [{ COD_ART, IND_DEV, CNT_MAX, CNT_MIN, MON_TOT, ... }] }]   // ver procesarNotaCredito
+//   inventarios: [{ encabezado: { COD_CIA, COD_ZON, COD_CLT, NUM_INV, HOR_INI, HOR_FIN, FEC_INV, NUM_ITM? },
+//                   lineas: [{ COD_ART, CNT_MAX, CNT_MIN }] }]   // inventario del cliente; ver procesarInventario
+//   depositos:  [{ encabezado: { COD_CIA, COD_BCO, CTA_BCO, NUM_DEP, MON_DEP, FEC_DEP, IND_MON, NOTAS?, DOC_PRO? },
 //                   lineas: [{ NUM_DOC, MON_CHE?, MON_EFE?, MON_DEP?, MON_TRA?, REF? }] }],
 //                   (una linea por documento; REF = texto plano de los cheques)
 //   promocionales: [{ RUTA, CLIENTE, NOTAS, FECHA_REQUERIDA: 'YYYY-MM-DD[ HH:MM:SS]',
 //                     FECHA_SOLICITUD: 'YYYY-MM-DD HH:MM:SS', COMPANIA? }]   // solicitud de material promocional
-//   consecutivos: [{ RUTA, PEDIDO?, FACTURA?, RECIBO? }]   // siguiente pedido / cotizacion / recibo de la ruta, ya incrementado por la app
+//   consecutivos: [{ RUTA, PEDIDO?, FACTURA?, RECIBO?, NOTACREDITO?, INVENTARIO? }]   // siguiente numero de cada documento de la ruta, ya incrementado por la app
 //   cambiosCliente: [{ COD_CLT, COD_CIA?, RUTA?, TABLA?, CAMPO, VALOR, VALOR_ANTERIOR?, FECHA? }]
 //                   // ultimo valor de cada dato del cliente editado en Consultar > Cliente
 // }
@@ -42,17 +50,20 @@
 //     visitas:      [{ CLIENTE, RUTA, INICIO, ok, duplicado?, error? }],
 //     pedidos:      [{ COD_ZON, NUM_PED, ok, duplicado?, conflicto?, error? }],
 //     aprobaciones: [{ COD_ZON, NUM_PED, ok, duplicado?, error? }],   // siempre viene (aunque sea [])
-//     depositos:    [{ CTA_BCO, NUM_DEP, ok, CONSEC_DEP?, duplicado?, conflicto?, error? }],
+//     notasCredito: [{ COD_ZON, NUM_DEV, ok, duplicado?, conflicto?, error? }],
+//     inventarios:  [{ COD_ZON, NUM_INV, ok, duplicado?, conflicto?, error? }],
+//     depositos:   [{ CTA_BCO, NUM_DEP, ok, CONSEC_DEP?, duplicado?, conflicto?, error? }],
 //     promocionales: [{ CLIENTE, FECHA_SOLICITUD, ok, ID?, duplicado?, error? }],
-//     consecutivos: [{ RUTA, PEDIDO, FACTURA?, ok, ignorado?, actual?, ignoradoFactura?, actualFactura?, error? }],
+//     consecutivos: [{ RUTA, PEDIDO, FACTURA?, ok, ignorado?, actual?, ignoradoFactura?, actualFactura?,
+//                      ignoradoNotaCredito?, actualNotaCredito?, ignoradoInventario?, actualInventario?, error? }],
 //     cambiosCliente: [{ COD_CLT, CAMPO, ok, error? }]   // uno por fila recibida, en el mismo orden
 //   }
 // }
 // success: false solo si el request entero es invalido (formato); el token lo valida mobileSession (401).
 //
 // Notas:
-//  - Se procesa en orden: ubicaciones, visitas, pedidos, aprobaciones, depositos, promocionales, consecutivos,
-//    cambiosCliente. Cada registro es
+//  - Se procesa en orden: ubicaciones, visitas, pedidos, aprobaciones, notasCredito, inventarios, depositos,
+//    promocionales, consecutivos, cambiosCliente. Cada registro es
 //    independiente: uno con error no impide guardar los demas.
 //  - No duplica: una visita que ya existe responde ok con duplicado: true y NO se sobrescribe (el
 //    celular puede reenviar lo mismo si se corto la respuesta).
@@ -66,6 +77,12 @@
 //    guarda 'F' (pedido). COD_CIA, NUM_PED y TIP_DOC de las
 //    lineas salen del encabezado. SUBTIPO_DESCRIPCION no existe en alFAC_ENC_PED: se ignora.
 //  - alFAC_DET_PED no tiene COD_ZON: un NUM_PED no puede repetirse entre rutas de la misma compania.
+//  - Bonificacion (lineas con ART_BON '1', siempre activa): lo regalado por articulo no puede pasar de
+//    lo que dan las promociones TIPO 'B' vigentes para el pedido (proporcional, por producto, misma
+//    regla que utils/precioFr.js; ver utils/bonificacionFr.js). Regalar menos esta bien. Si un articulo
+//    se regala de mas se rechaza ESE documento (ok: false, error). Solo al insertar, como el descuento.
+//    La linea regalada va sin montos (MON_PRC_MX, MON_PRC_MN, MON_TOT, MON_DSC, POR_DSC_AP en 0) y
+//    ART_BON solo admite 0/1 (errorLineasBonificadas).
 //  - Aprobacion: solo el vendedor aprueba, desde la app (las cotizaciones no vencen). Cada una va en
 //    su propia transaccion: si el encabezado (COD_CIA + NUM_PED + COD_ZON) tiene TIP_DOC 'C', pasa a
 //    'F' junto con todas sus lineas y FEC_PED (y FEC_DES si viene) toma lo que manda la app. Si ya es
@@ -79,6 +96,8 @@
 //    GET /fr/sync/consecutivos lo devuelve en la siguiente carga. FACTURA (consecutivo de cotizaciones)
 //    sigue la misma regla contra RUTA_CONSECUT_RT.FACTURA; su resultado va en ignoradoFactura/actualFactura.
 //    RECIBO (recibos de cobro; es el NUM_DEP de los depositos) igual, en ignoradoRecibo/actualRecibo.
+//    NOTACREDITO (es el NUM_DEV de las notas de credito) igual, en ignoradoNotaCredito/actualNotaCredito.
+//    INVENTARIO (es el NUM_INV de los inventarios del cliente) igual, en ignoradoInventario/actualInventario.
 //  - Deposito: cada deposito es un RECIBO de cobro de la app; NUM_DEP es el numero del recibo
 //    (RUTA_CONSECUT_RT.RECIBO de la ruta, texto: RERT_<ruta>_<correlativo>, p. ej. RERT_01_00001).
 //    La boleta / transferencia van en REF.
@@ -105,6 +124,7 @@
 const { QueryTypes } = require("sequelize");
 const { sequelize } = require("../../config/mssql");
 const { calcularTopesDescuento } = require("../../utils/topeDescuento");
+const { calcularBonificacionesPermitidas, errorBonificacion, errorLineasBonificadas, pedidoConBonificacion } = require("../../utils/bonificacionFr");
 
 const FECHA_REGEX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 // TIP_DOC del pedido: "F" = pedido (por defecto), "C" = cotizacion.
@@ -125,6 +145,67 @@ const COLUMNAS_DET = [
   "MON_PRC_MN", "POR_DSC_AP", "ART_BON", "PORC_IMPUESTO1", "PORC_IMPUESTO2", "PORCENTAJE_IMP1",
   "PORCENTAJE_IMP2", "PORC_EXONERACION", "MONTO_EXONERACION", "ES_CANASTA_BASICA", "ES_OTRO_CARGO",
 ];
+
+// Nota de credito: encabezado y lineas de alFAC_ENC_DEV / alFAC_DET_DEV que se aceptan de la app.
+// COD_CIA, COD_ZON y NUM_DEV salen del encabezado (tambien para las lineas); DOC_PRO siempre entra 'N'.
+const COLUMNAS_ENC_DEV = [
+  "COD_CLT", "HOR_INI", "HOR_FIN", "FEC_DEV", "OBS_DEV", "NUM_ITM", "LST_PRE", "EST_DEV", "MON_SIV",
+  "MON_DSC", "POR_DSC_AP", "MON_IMP_VT", "MON_IMP_CS", "COD_BOD", "IMPRESO", "CONSIGNACION", "NUM_REF",
+  "AUTOMATICA", "TIPO", "NCF_PREFIJO", "NCF", "NIVEL_PRECIO", "MONEDA", "FORMA_PAGO_DEV", "COD_PAIS",
+  "COD_GEO1", "COD_GEO2", "SERIE_RESOLUCION", "CONSEC_RESOLUCION", "TIPO_ANULACION", "POR_DESC_AP2",
+  "MONT_DESC2", "CLAVE_DE", "JUSTI_DEV_HACIEND", "ACTIVIDAD_COMERCIAL", "NCFMODIFICADO", "INCOTERMS",
+  "FORMAS_PAGO", "NATURALEZA_OPERACION", "CUFE", "CODIGOQR", "COD_MODIFICACION", "RAZON_MODIF",
+  "TIPO_INGRESO", "TIPO_PAGO", "NCF_CONTINGENCIA", "NCF_PREFIJO_CONTINGENCIA", "MASCARA_DTE",
+  "CODIGO_ANULACION", "SUBTIPO",
+];
+const FECHAS_ENC_DEV = ["HOR_INI", "HOR_FIN", "FEC_DEV"];
+const COLUMNAS_DET_DEV = [
+  "COD_ART", "IND_DEV", "MON_TOT", "MON_PRC_MX", "MON_PRC_MN", "CNT_MAX", "CNT_MIN", "LST_PRE", "OBS_DEV",
+  "MON_DSC", "POR_DSC_AP", "LOTE", "LOTE_HIST", "ART_BON", "TIPO_IMPUESTO1", "TIPO_TARIFA1",
+  "TIPO_IMPUESTO2", "TIPO_TARIFA2", "PORC_EXONERACION", "MONTO_EXONERACION", "PORC_IMPUESTO1",
+  "PORC_IMPUESTO2", "ES_OTRO_CARGO", "ES_CANASTA_BASICA", "USA_IMPUESTO2_CANTIDAD", "INDICADOR_FACTURACION",
+];
+// Columnas NOT NULL (INFORMATION_SCHEMA) que debe mandar la app; las numericas se validan como numero.
+const OBLIGATORIAS_ENC_DEV = ["COD_BOD", "EST_DEV", "IMPRESO", "CONSIGNACION"];
+const NUMERICAS_ENC_DEV = ["NUM_ITM", "LST_PRE", "MON_SIV", "MON_DSC", "POR_DSC_AP", "MON_IMP_VT", "MON_IMP_CS"];
+const NUMERICAS_DET_DEV = ["MON_TOT", "MON_PRC_MX", "MON_PRC_MN", "CNT_MAX", "CNT_MIN", "LST_PRE", "MON_DSC", "POR_DSC_AP"];
+// IND_DEV y ART_BON obligatorios; LOTE y LOTE_HIST son NOT NULL pero se aceptan vacios (sin lote).
+const OBLIGATORIAS_DET_DEV = ["IND_DEV", "ART_BON"];
+// Valores que usa la app (confirmados por el equipo movil, nov 2026). Tambien los usa la consulta web.
+//  Encabezado: EST_DEV 'A' (activa; la app no anula NC), TIPO 'N/C' (tipo de documento CxC de Exactus),
+//  SUBTIPO = RUTA_CONSECUT_RT.SUBTIPO_NOTA_CREDITO si es entero (si no, null), AUTOMATICA/IMPRESO/
+//  CONSIGNACION 'N', POR_DSC_AP 0, NUM_REF = NUM_FAC del CCF, NCFMODIFICADO = NCF del CCF (DTE-03-...).
+//  RAZON_MODIF = texto del vendedor o, si lo deja vacio, la descripcion del motivo.
+const IND_DEV_NC = {
+  B: "Devolucion, mercaderia en buen estado",
+  M: "Devolucion, mercaderia en mal estado",
+  P: "Sin devolucion fisica, solo monto",
+};
+// '0' = articulo vendido; '1' = bonificacion (la app hoy no la manda).
+const ART_BON_NC = ["0", "1"];
+// Catalogo propio de la app. '01' al precio y % de descuento del CCF; '02'/'03' monto por unidad hasta
+// el precio del CCF; '99' exige RAZON_MODIF.
+const MOTIVOS_NC = {
+  "01": "Devolucion de mercaderia",
+  "02": "Rebaja de precio",
+  "03": "Correccion de precio",
+  "99": "Otro motivo",
+};
+// Largos de las columnas de texto (INFORMATION_SCHEMA de erpadmin.alFAC_ENC_DEV / alFAC_DET_DEV).
+const LARGOS_ENC_DEV = {
+  NUM_DEV: 50, COD_CIA: 10, COD_ZON: 4, COD_CLT: 20, OBS_DEV: 80, EST_DEV: 1, COD_BOD: 4, IMPRESO: 1,
+  CONSIGNACION: 1, NUM_REF: 50, AUTOMATICA: 1, TIPO: 50, NCF_PREFIJO: 20, NCF: 40, NIVEL_PRECIO: 12,
+  MONEDA: 1, FORMA_PAGO_DEV: 1, COD_PAIS: 4, COD_GEO1: 12, COD_GEO2: 12, SERIE_RESOLUCION: 25,
+  TIPO_ANULACION: 3, CLAVE_DE: 50, JUSTI_DEV_HACIEND: 2, ACTIVIDAD_COMERCIAL: 10, NCFMODIFICADO: 40,
+  INCOTERMS: 4, FORMAS_PAGO: 4, NATURALEZA_OPERACION: 4, CUFE: 100, COD_MODIFICACION: 2, RAZON_MODIF: 250,
+  TIPO_INGRESO: 2, TIPO_PAGO: 2, NCF_CONTINGENCIA: 40, NCF_PREFIJO_CONTINGENCIA: 20, MASCARA_DTE: 100,
+  CODIGO_ANULACION: 4,
+};
+const LARGOS_DET_DEV = {
+  COD_ART: 20, IND_DEV: 1, OBS_DEV: 80, LOTE: 15, LOTE_HIST: 15, ART_BON: 1, TIPO_IMPUESTO1: 5,
+  TIPO_TARIFA1: 2, TIPO_IMPUESTO2: 5, TIPO_TARIFA2: 2, ES_OTRO_CARGO: 1, ES_CANASTA_BASICA: 1,
+  USA_IMPUESTO2_CANTIDAD: 1, INDICADOR_FACTURACION: 5,
+};
 
 // Encabezado y lineas de alCXC_ENC_DEP / alCXC_DET_DEP que se aceptan de la app.
 const COLUMNAS_ENC_DEP = ["MON_DEP", "FEC_DEP", "IND_MON", "NOTAS", "DOC_PRO"];
@@ -400,7 +481,10 @@ const procesarPedido = async (contexto, p) => {
         }
       } else {
         // Solo al insertar: un reenvio de lo ya guardado sigue siendo duplicado.
-        rechazo = errorDescuento(contexto, p, NUM_PED);
+        rechazo =
+          errorDescuento(contexto, p, NUM_PED) ||
+          errorLineasBonificadas(p, NUM_PED) ||
+          errorBonificacion(contexto.bonificaciones && contexto.bonificaciones.get(p), NUM_PED);
         if (rechazo) return;
         await insertar(
           "alFAC_ENC_PED",
@@ -482,6 +566,374 @@ const procesarAprobacion = async (contexto, a) => {
 };
 
 const esMonto = (v) => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
+
+// Validacion de la nota de credito contra el CCF que afecta (NUM_REF = NUM_FAC del historial).
+// Mismos criterios que la app, mas los que esta no podia ver:
+//  - NUM_REF debe empezar con 'DTE-03-' (credito fiscal). Hacienda solo emite CCF a contribuyentes, asi
+//    que no se mira CLIENTE_CIA.TIPO_CONTRIBUYENTE (CargaAlMovil lo deja 'F' fijo) ni CONTRIBUYENTE (NIT).
+//  - El CCF debe estar en erpadmin.alFAC_ENC_HIST_FAC de la compania, ser DEL MISMO CLIENTE y no estar
+//    anulado (ANULAR 'S'). No se exige la ruta: el historial repite la factura en varias rutas.
+//  - Por articulo y tipo (ART_BON '0' = vendido -> EST_BON 'V'; '1' = bonificado -> 'B'):
+//      cantidad de la nota <= SUM(CANT_FAC) - SUM(CANT_DEV) del CCF - lo de otras NC del mismo CCF aun
+//      no procesadas (DOC_PRO 'N' o NULL), con cantidad = CNT_MAX + CNT_MIN / FACTOR_VENTA (si > 1;
+//      si no, solo CNT_MAX), igual que utils/topeDescuento.js. Cuenta toda linea (B, M y P): una rebaja
+//      de precio tambien "consume" las unidades del CCF, como lo hace la app.
+//  - Cada linea: cantidad > 0 y MON_PRC_MX <= PRE_UNI del CCF (+0.01).
+//  - Notas POR MONTO (COD_MODIFICACION 02 rebaja, 03 correccion, 99 otro; cambio pedido por la app,
+//    nov 2026): no llevan articulos del CCF sino UNA linea base COD_ART '0000' (IND_DEV 'P', ART_BON '0',
+//    CNT_MAX 1, CNT_MIN 0). No se revisan articulo, cantidad ni precio; en su lugar:
+//      MON_SIV + MON_IMP_VT + MON_IMP_CS de esta nota <= MON_FAC del CCF (incluye IVA; solo lineas
+//      vendidas, sin bonificaciones) - el mismo total de las OTRAS notas de ese CCF (cualquier handheld,
+//      motivo y DOC_PRO), salvo anuladas (TIPO_ANULACION o CODIGO_ANULACION con valor).
+//    Las notas 01 (devolucion) siguen con la regla por articulo y cantidad.
+// Devuelve el mensaje del primer problema, o null.
+const PREFIJO_CCF = "DTE-03-";
+const MOTIVOS_POR_MONTO = ["02", "03", "99"];
+// Linea base de las notas por monto. No existe en ARTICULO (ni erpadmin ni CINCOH): se acepta solo aqui.
+const ARTICULO_BASE_NC = "0000";
+const TOLERANCIA_MONTO_NC = 0.01;
+const totalNc = (e) => (Number(e.MON_SIV) || 0) + (Number(e.MON_IMP_VT) || 0) + (Number(e.MON_IMP_CS) || 0);
+const centavos = (n) => (Math.round(n * 100) / 100).toFixed(2);
+const TOLERANCIA_NC = 0.0001;
+const TOLERANCIA_PRECIO_NC = 0.01;
+const redondeo = (n) => Math.round(n * 10000) / 10000;
+const cantidadNc = (contexto, l) => {
+  const factor = contexto.factorVenta.get(texto(l.COD_ART)) || 0;
+  return (Number(l.CNT_MAX) || 0) + (factor > 1 ? (Number(l.CNT_MIN) || 0) / factor : 0);
+};
+const tipoLinea = (artBon) => (texto(artBon) === "1" ? "B" : "V");
+
+const validarContraCcf = async (contexto, { COD_CIA, COD_CLT, NUM_REF, porMonto, total }, filas, transaction) => {
+  const opciones = { replacements: { COD_CIA, NUM_REF }, type: QueryTypes.SELECT, transaction };
+  const encabezados = await sequelize.query(
+    `SELECT LTRIM(RTRIM(COD_CLT)) AS COD_CLT, ISNULL(ANULAR, 'N') AS ANULAR, CAST(MON_FAC AS float) AS MON_FAC
+       FROM COAGRO2.erpadmin.alFAC_ENC_HIST_FAC
+      WHERE COD_CIA = :COD_CIA AND NUM_FAC = :NUM_REF`,
+    opciones
+  );
+  if (!encabezados.length) return `El CCF ${NUM_REF} no existe en el historial de facturas (compania ${COD_CIA})`;
+  const delCliente = encabezados.filter((e) => e.COD_CLT === COD_CLT);
+  if (!delCliente.length) return `El CCF ${NUM_REF} es del cliente ${encabezados[0].COD_CLT}, no de ${COD_CLT}`;
+  if (delCliente.every((e) => texto(e.ANULAR) === "S")) return `El CCF ${NUM_REF} esta anulado`;
+
+  if (porMonto) {
+    const montoCcf = Number(delCliente.find((e) => texto(e.ANULAR) !== "S").MON_FAC) || 0;
+    const [otras] = await sequelize.query(
+      `SELECT CAST(ISNULL(SUM(ISNULL(MON_SIV, 0) + ISNULL(MON_IMP_VT, 0) + ISNULL(MON_IMP_CS, 0)), 0) AS float) AS TOTAL
+         FROM COAGRO2.erpadmin.alFAC_ENC_DEV
+        WHERE COD_CIA = :COD_CIA AND NUM_REF = :NUM_REF
+          AND ISNULL(TIPO_ANULACION, '') = '' AND ISNULL(CODIGO_ANULACION, '') = ''`,
+      opciones
+    );
+    const disponible = montoCcf - otras.TOTAL;
+    if (total > disponible + TOLERANCIA_MONTO_NC) {
+      return (
+        `El monto de la nota (${centavos(total)}) supera lo disponible del CCF ${NUM_REF}: ` +
+        `${centavos(Math.max(disponible, 0))} (total CCF ${centavos(montoCcf)}, otras notas ${centavos(otras.TOTAL)})`
+      );
+    }
+    return null;
+  }
+
+  // En serie: las consultas comparten la transaccion (una sola conexion).
+  const detalle = await sequelize.query(
+    `SELECT LTRIM(RTRIM(COD_ART)) AS COD_ART, ISNULL(EST_BON, 'V') AS EST_BON,
+            CAST(SUM(ISNULL(CANT_FAC, 0)) AS float) AS CANT_FAC, CAST(SUM(ISNULL(CANT_DEV, 0)) AS float) AS CANT_DEV,
+            CAST(MAX(PRE_UNI) AS float) AS PRE_UNI
+       FROM COAGRO2.erpadmin.alFAC_DET_HIST_FAC
+      WHERE COD_CIA = :COD_CIA AND NUM_FAC = :NUM_REF
+      GROUP BY LTRIM(RTRIM(COD_ART)), ISNULL(EST_BON, 'V')`,
+    opciones
+  );
+  const pendientes = await sequelize.query(
+    `SELECT LTRIM(RTRIM(D.COD_ART)) AS COD_ART, D.ART_BON, CAST(D.CNT_MAX AS float) AS CNT_MAX,
+            CAST(D.CNT_MIN AS float) AS CNT_MIN
+       FROM COAGRO2.erpadmin.alFAC_DET_DEV D
+       JOIN COAGRO2.erpadmin.alFAC_ENC_DEV E
+         ON E.COD_CIA = D.COD_CIA AND E.COD_ZON = D.COD_ZON AND E.NUM_DEV = D.NUM_DEV
+      WHERE E.COD_CIA = :COD_CIA AND E.NUM_REF = :NUM_REF AND ISNULL(E.DOC_PRO, 'N') = 'N'`,
+    opciones
+  );
+
+  const delCcf = new Map(detalle.map((d) => [`${d.COD_ART}|${texto(d.EST_BON)}`, d]));
+  const enOtrasNc = new Map();
+  for (const p of pendientes) {
+    const k = `${p.COD_ART}|${tipoLinea(p.ART_BON)}`;
+    enOtrasNc.set(k, (enOtrasNc.get(k) || 0) + cantidadNc(contexto, p));
+  }
+
+  const enEstaNc = new Map();
+  for (const f of filas) {
+    const cantidad = cantidadNc(contexto, f);
+    const tipo = tipoLinea(f.ART_BON);
+    const que = tipo === "B" ? "bonificado" : "vendido";
+    if (!(cantidad > 0)) return `La cantidad del articulo ${f.COD_ART} debe ser mayor que 0`;
+    const linea = delCcf.get(`${f.COD_ART}|${tipo}`);
+    if (!linea) return `El articulo ${f.COD_ART} (${que}) no esta en el CCF ${NUM_REF}`;
+    if (Number(f.MON_PRC_MX) > linea.PRE_UNI + TOLERANCIA_PRECIO_NC) {
+      return `El precio del articulo ${f.COD_ART} (${Number(f.MON_PRC_MX)}) supera el del CCF (${linea.PRE_UNI})`;
+    }
+    const k = `${f.COD_ART}|${tipo}`;
+    enEstaNc.set(k, (enEstaNc.get(k) || 0) + cantidad);
+  }
+
+  for (const [k, cantidad] of enEstaNc) {
+    const linea = delCcf.get(k);
+    const otras = enOtrasNc.get(k) || 0;
+    const disponible = linea.CANT_FAC - linea.CANT_DEV - otras;
+    if (cantidad > disponible + TOLERANCIA_NC) {
+      return (
+        `El articulo ${linea.COD_ART} supera lo disponible en el CCF ${NUM_REF}: pide ${redondeo(cantidad)}, ` +
+        `disponible ${redondeo(Math.max(disponible, 0))} (facturado ${redondeo(linea.CANT_FAC)}, devuelto ` +
+        `${redondeo(linea.CANT_DEV)}, en otras notas sin procesar ${redondeo(otras)})`
+      );
+    }
+  }
+  return null;
+};
+
+// Nota de credito (devolucion sobre un credito fiscal) creada en la app. Solo la crea la movil; la
+// web solo la consulta (GET /fr/notaCredito). Llave COD_CIA + COD_ZON + NUM_DEV (PK de alFAC_ENC_DEV);
+// NUM_DEV es el consecutivo RUTA_CONSECUT_RT.NOTACREDITO de la ruta (la app lo avanza con consecutivos).
+//  - Ruta de la handheld y cliente asignado a la ruta; articulos existentes en ARTICULO.
+//  - Si ya existe con el mismo COD_CLT y HOR_INI es un reenvio (ok, duplicado: true, no se sobrescribe);
+//    si no coincide, otro documento uso el numero: ok: false, conflicto: true (la app renumera).
+//  - IND_DEV debe ser B/M/P, ART_BON 0/1 y COD_MODIFICACION (si viene) 01/02/03/99; con 99, RAZON_MODIF
+//    es obligatorio (ver IND_DEV_NC, ART_BON_NC, MOTIVOS_NC).
+//  - Lineas: la PK es COD_ART + IND_DEV + LOTE_HIST + LOTE + ART_BON; no pueden repetirse en la nota.
+//    LOTE y LOTE_HIST se guardan '' si no vienen (columnas NOT NULL).
+//  - Contra el CCF que se afecta (validarContraCcf, solo al insertar; un reenvio sigue siendo duplicado).
+//  - Encabezado + lineas en una transaccion. DOC_PRO siempre entra 'N' (pendiente de procesar).
+const procesarNotaCredito = async (contexto, n) => {
+  const enc = (n && n.encabezado) || {};
+  const lineas = Array.isArray(n && n.lineas) ? n.lineas : [];
+  const COD_CIA = texto(enc.COD_CIA);
+  const COD_ZON = texto(enc.COD_ZON);
+  const NUM_DEV = texto(enc.NUM_DEV);
+  const COD_CLT = texto(enc.COD_CLT);
+  const salida = { COD_ZON, NUM_DEV };
+  const falla = (error) => ({ ...salida, ok: false, error });
+
+  if (!COD_CIA || !NUM_DEV) return falla("COD_CIA y NUM_DEV son obligatorios");
+  const error = validarRutaCliente(contexto, COD_ZON, COD_CLT);
+  if (error) return falla(error);
+  if (!lineas.length) return falla("La nota de credito no trae lineas");
+
+  for (const c of FECHAS_ENC_DEV) if (!texto(enc[c])) return falla(`El campo ${c} es obligatorio`);
+  const mal = fechaInvalida(enc, FECHAS_ENC_DEV);
+  if (mal) return falla(`${mal} debe tener formato YYYY-MM-DD HH:MM:SS`);
+  for (const c of OBLIGATORIAS_ENC_DEV) if (!texto(enc[c])) return falla(`El campo ${c} es obligatorio`);
+  for (const c of NUMERICAS_ENC_DEV) if (!esMonto(enc[c])) return falla(`${c} debe ser un numero`);
+  if (Number(enc.NUM_ITM) !== lineas.length) {
+    return falla(`NUM_ITM (${enc.NUM_ITM}) no coincide con las ${lineas.length} lineas`);
+  }
+  const largoEnc = excedeLargo(LARGOS_ENC_DEV, { ...enc, COD_CIA, COD_ZON, NUM_DEV });
+  if (largoEnc) return falla(largoEnc);
+  const motivo = texto(enc.COD_MODIFICACION);
+  if (motivo && !MOTIVOS_NC[motivo]) {
+    return falla(`COD_MODIFICACION '${motivo}' no es valido (${Object.keys(MOTIVOS_NC).join(", ")})`);
+  }
+  if (motivo === "99" && !texto(enc.RAZON_MODIF)) return falla("RAZON_MODIF es obligatorio con el motivo 99 (otro)");
+  const NUM_REF = texto(enc.NUM_REF);
+  if (!NUM_REF) return falla("NUM_REF (numero del CCF que se afecta) es obligatorio");
+  if (!NUM_REF.startsWith(PREFIJO_CCF)) {
+    return falla(`La nota de credito solo se aplica a un credito fiscal (${PREFIJO_CCF}...); ${NUM_REF} no lo es`);
+  }
+  if (texto(enc.NCFMODIFICADO) && texto(enc.NCFMODIFICADO) !== NUM_REF) {
+    return falla(`NCFMODIFICADO (${texto(enc.NCFMODIFICADO)}) debe ser igual a NUM_REF (${NUM_REF})`);
+  }
+  // 02/03/99: una sola linea base '0000' (ver validarContraCcf).
+  const porMonto = MOTIVOS_POR_MONTO.includes(motivo);
+  const total = totalNc(enc);
+  if (porMonto) {
+    if (lineas.length !== 1) return falla(`Las notas ${MOTIVOS_POR_MONTO.join(", ")} llevan una sola linea (${ARTICULO_BASE_NC})`);
+    const base = lineas[0] || {};
+    if (texto(base.IND_DEV) !== "P" || texto(base.ART_BON) !== "0" || Number(base.CNT_MAX) !== 1 || Number(base.CNT_MIN) !== 0) {
+      return falla(`La linea ${ARTICULO_BASE_NC} debe ir con IND_DEV 'P', ART_BON '0', CNT_MAX 1 y CNT_MIN 0`);
+    }
+    if (!(total > 0)) return falla("El monto de la nota (MON_SIV + MON_IMP_VT + MON_IMP_CS) debe ser mayor que 0");
+  }
+
+  const llaves = new Set();
+  const filas = [];
+  for (const l of lineas) {
+    const linea = l || {};
+    const COD_ART = texto(linea.COD_ART);
+    if (!COD_ART) return falla("Cada linea debe traer COD_ART");
+    if (COD_ART === ARTICULO_BASE_NC) {
+      if (!porMonto) {
+        return falla(`El articulo ${ARTICULO_BASE_NC} solo se usa en notas por monto (${MOTIVOS_POR_MONTO.join(", ")})`);
+      }
+    } else if (porMonto) {
+      return falla(`Las notas ${MOTIVOS_POR_MONTO.join(", ")} llevan solo la linea ${ARTICULO_BASE_NC}, no articulos (${COD_ART})`);
+    } else if (!contexto.articulos.has(COD_ART)) {
+      return falla(`Articulo ${COD_ART} no existe`);
+    }
+    for (const c of OBLIGATORIAS_DET_DEV) {
+      if (!texto(linea[c])) return falla(`El campo ${c} del articulo ${COD_ART} es obligatorio`);
+    }
+    for (const c of NUMERICAS_DET_DEV) {
+      if (!esMonto(linea[c])) return falla(`${c} del articulo ${COD_ART} debe ser un numero`);
+    }
+    if (!IND_DEV_NC[texto(linea.IND_DEV)]) {
+      return falla(`IND_DEV del articulo ${COD_ART} debe ser ${Object.keys(IND_DEV_NC).join(", ")}`);
+    }
+    if (!ART_BON_NC.includes(texto(linea.ART_BON))) {
+      return falla(`ART_BON del articulo ${COD_ART} debe ser ${ART_BON_NC.join(" o ")}`);
+    }
+    const fila = { ...tomarColumnas(linea, COLUMNAS_DET_DEV), COD_ART, LOTE: texto(linea.LOTE), LOTE_HIST: texto(linea.LOTE_HIST) };
+    const largoDet = excedeLargo(LARGOS_DET_DEV, fila);
+    if (largoDet) return falla(largoDet);
+    const llave = [COD_ART, fila.IND_DEV, fila.LOTE_HIST, fila.LOTE, fila.ART_BON].join("|");
+    if (llaves.has(llave)) {
+      return falla(`El articulo ${COD_ART} viene repetido (mismo IND_DEV, lote y ART_BON)`);
+    }
+    llaves.add(llave);
+    filas.push(fila);
+  }
+
+  try {
+    let duplicado = false;
+    let conflicto = null;
+    let rechazo = null;
+    await sequelize.transaction(async (transaction) => {
+      const [existe] = await sequelize.query(
+        `SELECT TOP 1 COD_CLT, CONVERT(varchar(19), HOR_INI, 120) AS HOR_INI
+           FROM COAGRO2.erpadmin.alFAC_ENC_DEV WITH (UPDLOCK, HOLDLOCK)
+          WHERE COD_CIA = :COD_CIA AND COD_ZON = :COD_ZON AND NUM_DEV = :NUM_DEV`,
+        { replacements: { COD_CIA, COD_ZON, NUM_DEV }, type: QueryTypes.SELECT, transaction }
+      );
+      if (existe) {
+        if (texto(existe.COD_CLT) === COD_CLT && texto(existe.HOR_INI) === texto(enc.HOR_INI)) {
+          duplicado = true;
+        } else {
+          conflicto =
+            `El número ${NUM_DEV} ya lo usa otra nota de credito ` +
+            `(cliente ${texto(existe.COD_CLT)}, ${texto(existe.HOR_INI)})`;
+        }
+        return;
+      }
+
+      rechazo = await validarContraCcf(contexto, { COD_CIA, COD_CLT, NUM_REF, porMonto, total }, filas, transaction);
+      if (rechazo) return;
+      await insertar(
+        "alFAC_ENC_DEV",
+        { ...tomarColumnas(enc, COLUMNAS_ENC_DEV), COD_CIA, COD_ZON, NUM_DEV, COD_CLT, DOC_PRO: "N" },
+        FECHAS_ENC_DEV,
+        transaction
+      );
+      for (const fila of filas) {
+        await insertar("alFAC_DET_DEV", { ...fila, COD_CIA, COD_ZON, NUM_DEV }, [], transaction);
+      }
+    });
+    if (conflicto) return { ...salida, ok: false, conflicto: true, error: conflicto };
+    if (rechazo) return falla(rechazo);
+    return { ...salida, ok: true, duplicado };
+  } catch (e) {
+    console.log(e);
+    return falla(mensajeError(e));
+  }
+};
+
+// Inventario del cliente: el vendedor cuenta en la app cuanto tiene el cliente de cada articulo (cajas
+// en CNT_MAX y unidades sueltas en CNT_MIN). Solo lo crea la movil; la web solo consulta
+// (GET /fr/inventarioCliente) y la app baja su historial con GET /fr/sync/inventarios.
+// Tablas erpadmin.alFAC_ENC_INV / alFAC_DET_INV (vacias y sin procesos del ERP al crearse, nov 2026).
+//  - NUM_INV es el consecutivo RUTA_CONSECUT_RT.INVENTARIO de la ruta (la app lo avanza con consecutivos).
+//  - Llave: COD_CIA + COD_ZON + NUM_INV. La PK del encabezado incluye COD_CLT, pero la del detalle NO
+//    (COD_ART + COD_ZON + NUM_INV + COD_CIA): un NUM_INV no puede repetirse en la ruta aunque sea de otro
+//    cliente, y un articulo va una sola vez por inventario.
+//  - Ruta de la handheld y cliente asignado a la ruta; articulos existentes en ARTICULO.
+//  - HOR_INI, HOR_FIN y FEC_INV obligatorios ('YYYY-MM-DD HH:MM:SS'; en BD aceptan NULL, pero HOR_INI
+//    se usa para reconocer el reenvio). NUM_ITM = numero de lineas.
+//  - CNT_MAX y CNT_MIN obligatorios, >= 0 (contar 0 es valido: el cliente no tiene ese articulo).
+//  - Si ya existe con el mismo COD_CLT y HOR_INI es un reenvio (ok, duplicado: true, no se sobrescribe);
+//    si no, otro documento uso el numero: ok: false, conflicto: true (la app renumera).
+//  - Encabezado + lineas en una transaccion. DOC_PRO entra 'N' en encabezado y lineas.
+const FECHAS_ENC_INV = ["HOR_INI", "HOR_FIN", "FEC_INV"];
+const LARGOS_ENC_INV = { COD_CIA: 10, NUM_INV: 20, COD_ZON: 4, COD_CLT: 20 };
+const procesarInventario = async (contexto, i) => {
+  const enc = (i && i.encabezado) || {};
+  const lineas = Array.isArray(i && i.lineas) ? i.lineas : [];
+  const COD_CIA = texto(enc.COD_CIA);
+  const COD_ZON = texto(enc.COD_ZON);
+  const NUM_INV = texto(enc.NUM_INV);
+  const COD_CLT = texto(enc.COD_CLT);
+  const salida = { COD_ZON, NUM_INV };
+  const falla = (error) => ({ ...salida, ok: false, error });
+
+  if (!COD_CIA || !NUM_INV) return falla("COD_CIA y NUM_INV son obligatorios");
+  const error = validarRutaCliente(contexto, COD_ZON, COD_CLT);
+  if (error) return falla(error);
+  if (!lineas.length) return falla("El inventario no trae lineas");
+  for (const c of FECHAS_ENC_INV) if (!texto(enc[c])) return falla(`El campo ${c} es obligatorio`);
+  const mal = fechaInvalida(enc, FECHAS_ENC_INV);
+  if (mal) return falla(`${mal} debe tener formato YYYY-MM-DD HH:MM:SS`);
+  if (enc.NUM_ITM !== undefined && enc.NUM_ITM !== null && Number(enc.NUM_ITM) !== lineas.length) {
+    return falla(`NUM_ITM (${enc.NUM_ITM}) no coincide con las ${lineas.length} lineas`);
+  }
+  const largo = excedeLargo(LARGOS_ENC_INV, { COD_CIA, NUM_INV, COD_ZON, COD_CLT });
+  if (largo) return falla(largo);
+
+  const filas = [];
+  const vistos = new Set();
+  for (const l of lineas) {
+    const linea = l || {};
+    const COD_ART = texto(linea.COD_ART);
+    if (!COD_ART) return falla("Cada linea debe traer COD_ART");
+    if (!contexto.articulos.has(COD_ART)) return falla(`Articulo ${COD_ART} no existe`);
+    if (vistos.has(COD_ART)) return falla(`El articulo ${COD_ART} viene repetido en el inventario`);
+    vistos.add(COD_ART);
+    for (const c of ["CNT_MAX", "CNT_MIN"]) {
+      if (!esMonto(linea[c]) || Number(linea[c]) < 0) {
+        return falla(`${c} del articulo ${COD_ART} debe ser un numero mayor o igual a 0`);
+      }
+    }
+    filas.push({ COD_ART, CNT_MAX: Number(linea.CNT_MAX), CNT_MIN: Number(linea.CNT_MIN) });
+  }
+
+  try {
+    let duplicado = false;
+    let conflicto = null;
+    await sequelize.transaction(async (transaction) => {
+      const [existe] = await sequelize.query(
+        `SELECT TOP 1 COD_CLT, CONVERT(varchar(19), HOR_INI, 120) AS HOR_INI
+           FROM COAGRO2.erpadmin.alFAC_ENC_INV WITH (UPDLOCK, HOLDLOCK)
+          WHERE COD_CIA = :COD_CIA AND COD_ZON = :COD_ZON AND NUM_INV = :NUM_INV`,
+        { replacements: { COD_CIA, COD_ZON, NUM_INV }, type: QueryTypes.SELECT, transaction }
+      );
+      if (existe) {
+        if (texto(existe.COD_CLT) === COD_CLT && texto(existe.HOR_INI) === texto(enc.HOR_INI)) {
+          duplicado = true;
+        } else {
+          conflicto =
+            `El número ${NUM_INV} ya lo usa otro inventario ` +
+            `(cliente ${texto(existe.COD_CLT)}, ${texto(existe.HOR_INI)})`;
+        }
+        return;
+      }
+
+      await insertar(
+        "alFAC_ENC_INV",
+        {
+          COD_CIA, NUM_INV, COD_ZON, COD_CLT,
+          HOR_INI: texto(enc.HOR_INI), HOR_FIN: texto(enc.HOR_FIN), FEC_INV: texto(enc.FEC_INV),
+          NUM_ITM: lineas.length, DOC_PRO: "N",
+        },
+        FECHAS_ENC_INV,
+        transaction
+      );
+      for (const f of filas) {
+        await insertar("alFAC_DET_INV", { ...f, COD_ZON, NUM_INV, COD_CIA, DOC_PRO: "N" }, [], transaction);
+      }
+    });
+    if (conflicto) return { ...salida, ok: false, conflicto: true, error: conflicto };
+    return { ...salida, ok: true, duplicado };
+  } catch (e) {
+    console.log(e);
+    return falla(mensajeError(e));
+  }
+};
 
 const procesarDeposito = async (contexto, d) => {
   const enc = (d && d.encabezado) || {};
@@ -603,18 +1055,22 @@ const procesarConsecutivo = async (contexto, c) => {
   const PEDIDO = texto(c.PEDIDO);
   const FACTURA = texto(c.FACTURA);
   const RECIBO = texto(c.RECIBO);
+  const NOTACREDITO = texto(c.NOTACREDITO);
+  const INVENTARIO = texto(c.INVENTARIO);
   const salida = { RUTA, PEDIDO };
   if (FACTURA) salida.FACTURA = FACTURA;
   if (RECIBO) salida.RECIBO = RECIBO;
-  if (!RUTA || (!PEDIDO && !FACTURA && !RECIBO)) {
-    return { ...salida, ok: false, error: "RUTA y PEDIDO, FACTURA o RECIBO son obligatorios" };
+  if (NOTACREDITO) salida.NOTACREDITO = NOTACREDITO;
+  if (INVENTARIO) salida.INVENTARIO = INVENTARIO;
+  if (!RUTA || (!PEDIDO && !FACTURA && !RECIBO && !NOTACREDITO && !INVENTARIO)) {
+    return { ...salida, ok: false, error: "RUTA y PEDIDO, FACTURA, RECIBO, NOTACREDITO o INVENTARIO son obligatorios" };
   }
   if (!contexto.rutas.has(RUTA)) return { ...salida, ok: false, error: `La ruta ${RUTA} no pertenece a esta handheld` };
 
   try {
     return await sequelize.transaction(async (transaction) => {
       const [fila] = await sequelize.query(
-        `SELECT PEDIDO, FACTURA, RECIBO FROM COAGRO2.erpadmin.RUTA_CONSECUT_RT WITH (UPDLOCK) WHERE RUTA = :RUTA`,
+        `SELECT PEDIDO, FACTURA, RECIBO, NOTACREDITO, INVENTARIO FROM COAGRO2.erpadmin.RUTA_CONSECUT_RT WITH (UPDLOCK) WHERE RUTA = :RUTA`,
         { replacements: { RUTA }, type: QueryTypes.SELECT, transaction }
       );
       if (!fila) return { ...salida, ok: false, error: `La ruta ${RUTA} no tiene consecutivos configurados` };
@@ -625,6 +1081,8 @@ const procesarConsecutivo = async (contexto, c) => {
         { columna: "PEDIDO", valor: PEDIDO, ignorado: "ignorado", actual: "actual" },
         { columna: "FACTURA", valor: FACTURA, ignorado: "ignoradoFactura", actual: "actualFactura" },
         { columna: "RECIBO", valor: RECIBO, ignorado: "ignoradoRecibo", actual: "actualRecibo" },
+        { columna: "NOTACREDITO", valor: NOTACREDITO, ignorado: "ignoradoNotaCredito", actual: "actualNotaCredito" },
+        { columna: "INVENTARIO", valor: INVENTARIO, ignorado: "ignoradoInventario", actual: "actualInventario" },
       ];
       for (const campo of campos) {
         if (!campo.valor) continue;
@@ -642,7 +1100,7 @@ const procesarConsecutivo = async (contexto, c) => {
       if (sets.length) {
         await sequelize.query(
           `UPDATE COAGRO2.erpadmin.RUTA_CONSECUT_RT SET ${sets.join(", ")} WHERE RUTA = :RUTA`,
-          { replacements: { RUTA, PEDIDO, FACTURA, RECIBO }, transaction }
+          { replacements: { RUTA, PEDIDO, FACTURA, RECIBO, NOTACREDITO, INVENTARIO }, transaction }
         );
       }
       return respuesta;
@@ -725,18 +1183,17 @@ const procesarPromocional = async (contexto, p) => {
 //  - DIAS_VISITA (RUTA_CLIENTE): un cliente solo tiene UN dia por ruta (misma regla que el CRUD
 //    /fr/rutaCliente), asi que VALOR debe traer un solo dia. Si es el mismo que ya tiene, no se toca
 //    (conserva su ORDEN); si es otro, se mueve a ese dia al final: ORDEN = MAX(ORDEN) + 1 de la ruta y dia.
-//  - Divisiones geograficas (CLIENTE_CIA, reforma 2024, opcion B; ver GET /fr/sync/municipios):
-//    DIVISION_GEOGRAFICA1 = departamento, DIVISION_GEOGRAFICA2 = distrito (codigo del ERP) y
-//    DIVISION_GEOGRAFICA3 (columna division_geografica3) = municipio nuevo. "" -> NULL (se permite
-//    vaciar). Si traen valor (validarDivision):
-//      1 debe existir en erpadmin.DIVISION_GEOGRAFICA1 del pais del cliente;
+//  - Divisiones geograficas (CLIENTE_CIA, reforma 2024, catalogos nativos de Softland en erpadmin;
+//    ver GET /fr/sync/municipios): DIVISION_GEOGRAFICA1 = departamento, DIVISION_GEOGRAFICA2 =
+//    municipio y DIVISION_GEOGRAFICA3 (columna division_geografica3) = distrito. "" -> NULL (se
+//    permite vaciar). Si traen valor (validarDivision), en el pais de las divisiones:
+//      1 debe existir en erpadmin.DIVISION_GEOGRAFICA1;
 //      2 debe existir en erpadmin.DIVISION_GEOGRAFICA2 para el departamento;
-//      3 debe existir en erpadmin.FR_MUNICIPIO para el departamento;
-//      si en el MISMO envio vienen el 2 y el 3 del cliente, el distrito debe ser de ese municipio
-//      segun erpadmin.FR_DISTRITO (si no, se rechazan los dos).
-//    Departamento de referencia: el ultimo que vino en el envio para ese cliente; si no vino, el
-//    guardado en CLIENTE_CIA. Pais: CLIENTE_CIA.COD_PAIS si tiene departamentos; si no (en este ERP
-//    COD_PAIS suele ser un codigo de vendedor), FR_PAIS_DIVISION o 'SAL'.
+//      3 debe existir en erpadmin.DIVISION_GEOGRAFICA3 para el departamento y el municipio.
+//    Departamento / municipio de referencia: el ultimo que vino en el envio para ese cliente; si no
+//    vino, el guardado en CLIENTE_CIA. La app debe mandar los tres juntos al cambiar uno de arriba.
+//    Pais: CLIENTE_CIA.COD_PAIS si tiene departamentos; si no (en este ERP COD_PAIS suele ser un
+//    codigo de vendedor), FR_PAIS_DIVISION o 'ESA'.
 //  - Textos que no caben en la columna: ok false (no se recortan). VALOR_ANTERIOR y FECHA no se usan.
 const textoLibre = (largo, vacio) => ({ tipo: "texto", largo, vacio });
 const numero = (min, max, entero = false) => ({ tipo: "numero", min, max, entero });
@@ -769,9 +1226,8 @@ const CAMPOS_CAMBIO_CLIENTE = {
   POR_EXC_CS: { tabla: "cia", columna: "POR_EXC_CS", ...numero(0, 100) },
   DESCUENTO: { tabla: "cia", columna: "DESCUENTO", ...numero(0, 100) },
   IND_MON: { tabla: "cia", columna: "IND_MON", tipo: "opcion", opciones: ["L", "D"] },
-  // Divisiones geograficas (reforma 2024, opcion B): 1 = departamento, 2 = distrito (codigo del ERP,
-  // DIVISION_GEOGRAFICA2), 3 = municipio nuevo (FR_MUNICIPIO). Se validan contra los catalogos en
-  // validarDivision. "" -> NULL.
+  // Divisiones geograficas (catalogos de Softland): 1 = departamento, 2 = municipio, 3 = distrito.
+  // Se validan contra erpadmin.DIVISION_GEOGRAFICA1/2/3 en validarDivision. "" -> NULL.
   DIVISION_GEOGRAFICA1: { tabla: "cia", columna: "DIVISION_GEOGRAFICA1", ...textoLibre(12, "null"), division: 1 },
   DIVISION_GEOGRAFICA2: { tabla: "cia", columna: "DIVISION_GEOGRAFICA2", ...textoLibre(12, "null"), division: 2 },
   DIVISION_GEOGRAFICA3: { tabla: "cia", columna: "division_geografica3", ...textoLibre(50, "null"), division: 3 },
@@ -853,7 +1309,7 @@ const cambiarDiaVisita = async (contexto, COD_CLT, c) => {
 
 // Pais de las divisiones geograficas del cliente. CLIENTE_CIA.COD_PAIS en este ERP no siempre es un
 // pais (alFAC_PAIS mezcla paises con vendedores, p. ej. 'VRR1'): si no tiene departamentos en
-// erpadmin.DIVISION_GEOGRAFICA1 se usa FR_PAIS_DIVISION (por defecto 'SAL', el unico con divisiones).
+// erpadmin.DIVISION_GEOGRAFICA1 se usa FR_PAIS_DIVISION (por defecto 'ESA', el unico con divisiones).
 const paisDivision = async (codPais) => {
   const pais = texto(codPais);
   if (pais) {
@@ -863,66 +1319,52 @@ const paisDivision = async (codPais) => {
     );
     if (hay) return pais;
   }
-  return texto(process.env.FR_PAIS_DIVISION) || "SAL";
+  return texto(process.env.FR_PAIS_DIVISION) || "ESA";
 };
 
-// Valida un cambio de DIVISION_GEOGRAFICA1/2/3 contra los catalogos (ver comentario de
-// procesarCambioCliente). `valor` ya viene normalizado (null = vaciar). Devuelve el error o null.
+// Valida un cambio de DIVISION_GEOGRAFICA1/2/3 contra erpadmin.DIVISION_GEOGRAFICA1/2/3 (ver comentario
+// de procesarCambioCliente). `valor` ya viene normalizado (null = vaciar). Devuelve el error o null.
 const validarDivision = async (contexto, COD_CLT, def, valor, cia) => {
   if (valor === null) return null;
   const pais = await paisDivision(cia.COD_PAIS);
-  // Lo que vino en este envio para el cliente (ultimo valor de cada campo).
+  // Lo que vino en este envio para el cliente (ultimo valor de cada campo); si no, lo guardado.
   const envio = contexto.divisionesEnvio.get(COD_CLT) || {};
-  const tieneEnvio = (campo) => Object.prototype.hasOwnProperty.call(envio, campo);
-  const depto = tieneEnvio("DIVISION_GEOGRAFICA1") ? envio.DIVISION_GEOGRAFICA1 : texto(cia.DIVISION_GEOGRAFICA1);
-  const existe = async (sql, replacements) =>
-    (await sequelize.query(sql, { replacements, type: QueryTypes.SELECT })).length > 0;
+  const deEnvio = (campo, guardado) =>
+    Object.prototype.hasOwnProperty.call(envio, campo) ? envio[campo] : texto(guardado);
+  const depto = deEnvio("DIVISION_GEOGRAFICA1", cia.DIVISION_GEOGRAFICA1);
+  const municipio = deEnvio("DIVISION_GEOGRAFICA2", cia.DIVISION_GEOGRAFICA2);
+  const existe = async (tabla, where, replacements) =>
+    (
+      await sequelize.query(`SELECT TOP 1 1 AS OK FROM COAGRO2.erpadmin.${tabla} WHERE PAIS = :pais AND ${where}`, {
+        replacements: { pais, ...replacements },
+        type: QueryTypes.SELECT,
+      })
+    ).length > 0;
 
   if (def.division === 1) {
-    const ok = await existe(
-      `SELECT TOP 1 1 AS OK FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA1
-        WHERE PAIS = :pais AND DIVISION_GEOGRAFICA1 = :valor`,
-      { pais, valor }
-    );
+    const ok = await existe("DIVISION_GEOGRAFICA1", "DIVISION_GEOGRAFICA1 = :valor", { valor });
     return ok ? null : `El departamento ${valor} no existe (pais ${pais})`;
   }
 
-  const que = def.division === 2 ? "el distrito" : "el municipio";
-  if (!depto) return `No se puede validar ${que} ${valor}: el cliente no tiene departamento`;
-
-  if (def.division === 3) {
+  if (!depto) {
+    return `No se puede validar ${def.division === 2 ? "el municipio" : "el distrito"} ${valor}: el cliente no tiene departamento`;
+  }
+  if (def.division === 2) {
     const ok = await existe(
-      `SELECT TOP 1 1 AS OK FROM COAGRO2.erpadmin.FR_MUNICIPIO
-        WHERE PAIS = :pais AND DIVISION_GEOGRAFICA1 = :depto AND MUNICIPIO = :valor`,
-      { pais, depto, valor }
+      "DIVISION_GEOGRAFICA2",
+      "DIVISION_GEOGRAFICA1 = :depto AND DIVISION_GEOGRAFICA2 = :valor",
+      { depto, valor }
     );
-    if (!ok) return `El municipio ${valor} no existe en el departamento ${depto}`;
-  } else {
-    const ok = await existe(
-      `SELECT TOP 1 1 AS OK FROM COAGRO2.erpadmin.DIVISION_GEOGRAFICA2
-        WHERE PAIS = :pais AND DIVISION_GEOGRAFICA1 = :depto AND DIVISION_GEOGRAFICA2 = :valor`,
-      { pais, depto, valor }
-    );
-    if (!ok) return `El distrito ${valor} no existe en el departamento ${depto}`;
+    return ok ? null : `El municipio ${valor} no existe en el departamento ${depto}`;
   }
 
-  // Distrito y municipio en el MISMO envio: el distrito debe ser de ese municipio (FR_DISTRITO).
-  if (tieneEnvio("DIVISION_GEOGRAFICA2") && tieneEnvio("DIVISION_GEOGRAFICA3")) {
-    const distrito = def.division === 2 ? valor : envio.DIVISION_GEOGRAFICA2;
-    const municipio = def.division === 3 ? valor : envio.DIVISION_GEOGRAFICA3;
-    if (distrito && municipio) {
-      const [asignado] = await sequelize.query(
-        `SELECT LTRIM(RTRIM(MUNICIPIO)) AS MUNICIPIO FROM COAGRO2.erpadmin.FR_DISTRITO
-          WHERE PAIS = :pais AND DIVISION_GEOGRAFICA1 = :depto AND DIVISION_GEOGRAFICA2 = :distrito`,
-        { replacements: { pais, depto, distrito }, type: QueryTypes.SELECT }
-      );
-      if (!asignado) return `El distrito ${distrito} no tiene municipio asignado (FR_DISTRITO)`;
-      if (asignado.MUNICIPIO !== municipio) {
-        return `El distrito ${distrito} no pertenece al municipio ${municipio} (es del municipio ${asignado.MUNICIPIO})`;
-      }
-    }
-  }
-  return null;
+  if (!municipio) return `No se puede validar el distrito ${valor}: el cliente no tiene municipio`;
+  const ok = await existe(
+    "DIVISION_GEOGRAFICA3",
+    "DIVISION_GEOGRAFICA1 = :depto AND DIVISION_GEOGRAFICA2 = :municipio AND DIVISION_GEOGRAFICA3 = :valor",
+    { depto, municipio, valor }
+  );
+  return ok ? null : `El distrito ${valor} no existe en el municipio ${municipio} (departamento ${depto})`;
 };
 
 const procesarCambioCliente = async (contexto, c) => {
@@ -960,7 +1402,7 @@ const procesarCambioCliente = async (contexto, c) => {
     // CLIENTE_CIA: la fila de COD_CIA si viene; si no, la misma que manda /fr/sync/clientes.
     const COD_CIA = texto(c.COD_CIA);
     const [cia] = await sequelize.query(
-      `SELECT TOP 1 COD_CIA, COD_PAIS, DIVISION_GEOGRAFICA1 FROM COAGRO2.erpadmin.CLIENTE_CIA
+      `SELECT TOP 1 COD_CIA, COD_PAIS, DIVISION_GEOGRAFICA1, DIVISION_GEOGRAFICA2 FROM COAGRO2.erpadmin.CLIENTE_CIA
         WHERE COD_CLT = :COD_CLT AND (:COD_CIA = '' OR COD_CIA = :COD_CIA)
         ORDER BY CASE WHEN COD_CIA = 'CINCOH' THEN 0 ELSE 1 END, COD_CIA`,
       { replacements: { COD_CLT, COD_CIA }, type: QueryTypes.SELECT }
@@ -1008,7 +1450,7 @@ const postSyncEnviar = async (req, res) => {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return res.send({ result: {}, success: false, errors: ["El cuerpo debe ser un objeto JSON"] });
     }
-    for (const k of ["ubicaciones", "visitas", "pedidos", "aprobaciones", "depositos", "promocionales", "consecutivos", "cambiosCliente"]) {
+    for (const k of ["ubicaciones", "visitas", "pedidos", "aprobaciones", "notasCredito", "inventarios", "depositos", "promocionales", "consecutivos", "cambiosCliente"]) {
       if (body[k] !== undefined && body[k] !== null && !Array.isArray(body[k])) {
         return res.send({ result: {}, success: false, errors: [`${k} debe ser un arreglo`] });
       }
@@ -1017,23 +1459,27 @@ const postSyncEnviar = async (req, res) => {
     const visitas = body.visitas || [];
     const pedidos = body.pedidos || [];
     const aprobaciones = body.aprobaciones || [];
+    const notasCredito = body.notasCredito || [];
+    const inventarios = body.inventarios || [];
     const depositos = body.depositos || [];
     const promocionales = body.promocionales || [];
     const consecutivos = body.consecutivos || [];
     const cambiosCliente = body.cambiosCliente || [];
 
-    // Contexto para validar: rutas de la handheld, sus clientes y los articulos de los pedidos.
+    // Contexto para validar: rutas de la handheld, sus clientes y los articulos de pedidos y notas de credito.
     const asignaciones = await sequelize.query(
       `SELECT RUTA, CLIENTE FROM COAGRO2.erpadmin.RUTA_CLIENTE WHERE RUTA IN (:rutas)`,
       { replacements: { rutas: req.mobile.codigosRuta }, type: QueryTypes.SELECT }
     );
     const codigosArt = [
       ...new Set(
-        pedidos.flatMap((p) => (Array.isArray(p && p.lineas) ? p.lineas : []).map((l) => texto(l.COD_ART)))
+        [...pedidos, ...notasCredito, ...inventarios].flatMap((p) =>
+          (Array.isArray(p && p.lineas) ? p.lineas : []).map((l) => texto(l && l.COD_ART))
+        )
       ),
     ].filter(Boolean);
     const articulos = await porLotes(codigosArt, (lote) =>
-      sequelize.query(`SELECT COD_ART FROM COAGRO2.erpadmin.ARTICULO WHERE COD_ART IN (:lote)`, {
+      sequelize.query(`SELECT COD_ART, FACTOR_VENTA FROM COAGRO2.erpadmin.ARTICULO WHERE COD_ART IN (:lote)`, {
         replacements: { lote },
         type: QueryTypes.SELECT,
       })
@@ -1049,21 +1495,27 @@ const postSyncEnviar = async (req, res) => {
       asignaciones: new Set(asignaciones.map((a) => `${texto(a.RUTA)}|${texto(a.CLIENTE)}`)),
       clientesDeLaHandheld: new Set(asignaciones.map((a) => texto(a.CLIENTE))),
       articulos: new Set(articulos.map((a) => texto(a.COD_ART))),
+      // FACTOR_VENTA por articulo, para pasar CNT_MAX + CNT_MIN a unidades de la factura (notas de credito).
+      factorVenta: new Map(articulos.map((a) => [texto(a.COD_ART), Number(a.FACTOR_VENTA) || 0])),
       handheld: texto(req.mobile.handheld && req.mobile.handheld.HANDHELD),
       agenteDeRuta: new Map(req.mobile.rutas.map((r) => [texto(r.RUTA), texto(r.AGENTE)])),
       // Ultimo DIVISION_GEOGRAFICA1/2/3 de cada cliente en este envio (para validarDivision).
       divisionesEnvio: divisionesDelEnvio(cambiosCliente),
       // null = validacion de descuento apagada (FR_VALIDAR_DESCUENTO distinto de S).
       topesDescuento: validarDescuentoActiva() && pedidos.length ? await topesDePedidos(pedidos) : null,
+      // Bonificacion permitida por pedido (solo los que traen lineas ART_BON '1'); ver utils/bonificacionFr.js.
+      bonificaciones: pedidos.some(pedidoConBonificacion) ? await calcularBonificacionesPermitidas(pedidos) : null,
     };
 
-    // Orden: ubicaciones, visitas, pedidos, aprobaciones, depositos, promocionales, consecutivos,
-    // cambiosCliente.
+    // Orden: ubicaciones, visitas, pedidos, aprobaciones, notasCredito, inventarios, depositos,
+    // promocionales, consecutivos, cambiosCliente.
     const result = {
       ubicaciones: [],
       visitas: [],
       pedidos: [],
       aprobaciones: [],
+      notasCredito: [],
+      inventarios: [],
       depositos: [],
       promocionales: [],
       consecutivos: [],
@@ -1073,6 +1525,8 @@ const postSyncEnviar = async (req, res) => {
     for (const v of visitas) result.visitas.push(await procesarVisita(contexto, v || {}));
     for (const p of pedidos) result.pedidos.push(await procesarPedido(contexto, p || {}));
     for (const a of aprobaciones) result.aprobaciones.push(await procesarAprobacion(contexto, a || {}));
+    for (const n of notasCredito) result.notasCredito.push(await procesarNotaCredito(contexto, n || {}));
+    for (const i of inventarios) result.inventarios.push(await procesarInventario(contexto, i || {}));
     for (const d of depositos) result.depositos.push(await procesarDeposito(contexto, d || {}));
     for (const p of promocionales) result.promocionales.push(await procesarPromocional(contexto, p || {}));
     for (const c of consecutivos) result.consecutivos.push(await procesarConsecutivo(contexto, c || {}));
@@ -1085,5 +1539,9 @@ const postSyncEnviar = async (req, res) => {
   }
 };
 
-// Las columnas tambien las usa GET /fr/sync/cotizaciones (controllers/fr/sync.js).
-module.exports = { postSyncEnviar, COLUMNAS_ENC, COLUMNAS_DET, FECHAS_ENC };
+// Las columnas tambien las usan GET /fr/sync/cotizaciones, /notasCredito e /inventarios (controllers/fr/sync.js).
+module.exports = {
+  postSyncEnviar, COLUMNAS_ENC, COLUMNAS_DET, FECHAS_ENC, COLUMNAS_ENC_DEV, COLUMNAS_DET_DEV, FECHAS_ENC_DEV,
+  FECHAS_ENC_INV,
+  IND_DEV_NC, MOTIVOS_NC,
+};
