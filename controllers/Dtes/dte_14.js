@@ -450,6 +450,7 @@ const postDte14 = async (req, res) => {
           );
           const newfile = fileName + `${_ide.numeroControl}.json`;
 
+          fs.mkdirSync(path.dirname(newfile), { recursive: true });
           fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
           await emailRechazo(
             _ide.numeroControl,
@@ -488,6 +489,7 @@ const postDte14 = async (req, res) => {
         );
         const newfile = fileName + `${_ide.numeroControl}.json`;
 
+        fs.mkdirSync(path.dirname(newfile), { recursive: true });
         fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
         await emailEnviado(
           _ide.numeroControl,

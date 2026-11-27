@@ -323,6 +323,7 @@ const postDte03 = async (req, res) => {
           );
           const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
+          fs.mkdirSync(path.dirname(newfile), { recursive: true });
           fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
           await emailRechazo(
             _identificacion.numeroControl,
@@ -347,7 +348,7 @@ const postDte03 = async (req, res) => {
           });
           return;
         } catch (error) {
-          logger.error("Error capturado", { controller: "dte_03", action: "postDte03" });
+          logger.error("Error capturado: " + (error && error.message), { controller: "dte_03", action: "postDte03" });
         }
         //enviamos correo a contabilidad para que corrigan porque esta rechazado
       } else if (_respuestaMH.estado === "PROCESADO") {
@@ -370,6 +371,7 @@ const postDte03 = async (req, res) => {
         );
         const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
+        fs.mkdirSync(path.dirname(newfile), { recursive: true });
         fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
         if (empresa[0].ambiente === "00") {
           await emailEnviado(
@@ -425,6 +427,7 @@ const postDte03 = async (req, res) => {
     );
     const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
+    fs.mkdirSync(path.dirname(newfile), { recursive: true });
     fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
     await emailContingencia(
       _identificacion.numeroControl,
@@ -582,7 +585,7 @@ try {
       const _totalPagar = totalLinea - totalDescuento + totalImpuesto1;
       return _cuerpoDoc;
     } catch (error) {
-      logger.error("Error capturado", { controller: "dte_03", action: "postDte03" });
+      logger.error("Error capturado: " + (error && error.message), { controller: "dte_03", action: "postDte03" });
     }
 }  
  else {
@@ -647,7 +650,7 @@ try {
       const _totalPagar = totalLinea - totalDescuento + totalImpuesto1;
       return _cuerpoDoc;
     } catch (error) {
-      logger.error("Error capturado", { controller: "dte_03", action: "postDte03" });
+      logger.error("Error capturado: " + (error && error.message), { controller: "dte_03", action: "postDte03" });
     }
   }
 };
@@ -719,7 +722,7 @@ const cuerpoDocLote = async (_documento, tipo, esquema) => {
       const _totalPagar = totalLinea - totalDescuento + totalImpuesto1;
       return _cuerpoDoc;
     } catch (error) {
-      logger.error("Error capturado", { controller: "dte_03", action: "postDte03" });
+      logger.error("Error capturado: " + (error && error.message), { controller: "dte_03", action: "postDte03" });
     }
   } 
 
@@ -787,7 +790,7 @@ const cuerpoDocLote = async (_documento, tipo, esquema) => {
       const _totalPagar = totalLinea - totalDescuento + totalImpuesto1;
       return _cuerpoDoc;
     } catch (error) {
-      logger.error("Error capturado", { controller: "dte_03", action: "postDte03" });
+      logger.error("Error capturado: " + (error && error.message), { controller: "dte_03", action: "postDte03" });
     }
 
 }
@@ -853,7 +856,7 @@ else {
       const _totalPagar = totalLinea - totalDescuento + totalImpuesto1;
       return _cuerpoDoc;
     } catch (error) {
-      logger.error("Error capturado", { controller: "dte_03", action: "postDte03" });
+      logger.error("Error capturado: " + (error && error.message), { controller: "dte_03", action: "postDte03" });
     }
   }
   const dataFacLinea = await sequelize.query(

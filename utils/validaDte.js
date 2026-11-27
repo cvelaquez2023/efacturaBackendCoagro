@@ -95,6 +95,15 @@ const formatear = (e) => {
 // requerido" con "0001"; exige el formato del número de control (S028 / P001).
 const reglasExtraMH = (json, tipo) => {
   const errores = [];
+
+  // DTE: DUI del receptor (CAT-022 "13") en v2 = 9 dígitos sin guion.
+  // Rechazo real (2026-11-27, FE v2): "04189757-1" -> "#/receptor/numDocumento
+  // no cumple el formato requerido".
+  const rec = json?.receptor;
+  if (rec && rec.tipoDocumento === "13" && !/^[0-9]{9}$/.test(String(rec.numDocumento ?? ""))) {
+    errores.push(`/receptor/numDocumento: DUI "${rec.numDocumento}" debe ir con 9 dígitos sin guion`);
+  }
+
   if (tipo !== "invalidacion" && tipo !== "contingencia") return errores;
   const e = json?.emisor || {};
   const revisar = (campo, formato, ejemplo) => {

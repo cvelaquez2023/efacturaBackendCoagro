@@ -57,6 +57,14 @@ const direccionCliente = (cli, complemento, v2) => {
   };
 };
 
+// DUI del receptor (tipoDocumento 13). v1: "########-#". v2: 9 dígitos sin guion;
+// Hacienda rechazó "04189757-1" en FE v2 con "#/receptor/numDocumento no cumple
+// el formato requerido" (regla del servidor, no está en el esquema).
+const duiMH = (contribuyente, v2) => {
+  const digitos = String(contribuyente ?? "").replace(/\D/g, "");
+  return v2 ? digitos.substring(0, 9) : digitos.substring(0, 8) + "-" + digitos.substring(8, 9);
+};
+
 const direccionEmpresa = (emp, v2) => {
   const dir = {
     departamento: emp.departamento,
@@ -615,10 +623,7 @@ const receptor = async (_factura, tipoDte, esquema, empresa) => {
        //dui =13
        //otro=37
       _tipoDo = "13";
-      const dui00 = dataCliente[0].CONTRIBUYENTE;
-      const dui01 = dui00.substring(0, 8);
-      const dui02 = dui00.substring(8, 9);
-      _dui = dui01 + "-" + dui02;
+      _dui = duiMH(dataCliente[0].CONTRIBUYENTE, v2);
     }
 
     let _correo,
@@ -680,10 +685,7 @@ const receptor = async (_factura, tipoDte, esquema, empresa) => {
       _tipoDo = "36";
     } else {
       _tipoDo = "13";
-      const dui00 = dataCliente[0].CONTRIBUYENTE;
-      const dui01 = dui00.substring(0, 8);
-      const dui02 = dui00.substring(8, 9);
-      _dui = dui01 + "-" + dui02;
+      _dui = duiMH(dataCliente[0].CONTRIBUYENTE, v2);
     }
 
     let _correo,
@@ -723,10 +725,7 @@ const receptor = async (_factura, tipoDte, esquema, empresa) => {
       _tipoDo = "36";
     } else {
       _tipoDo = "13";
-      const dui00 = dataCliente[0].CONTRIBUYENTE;
-      const dui01 = dui00.substring(0, 8);
-      const dui02 = dui00.substring(8, 9);
-      _dui = dui01 + "-" + dui02;
+      _dui = duiMH(dataCliente[0].CONTRIBUYENTE, v2);
     }
 
     let _correo,

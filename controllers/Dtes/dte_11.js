@@ -250,6 +250,7 @@ const _fechaFac = await SqlFactura(_factura, empresa[0].esquemaBD);
         );
         const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
+        fs.mkdirSync(path.dirname(newfile), { recursive: true });
         fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
         await emailRechazo(
           _identificacion.numeroControl,
@@ -274,7 +275,7 @@ const _fechaFac = await SqlFactura(_factura, empresa[0].esquemaBD);
         });
         return;
       } catch (error) {
-        logger.error("Error capturado", { controller: "dte_11", action: "postDte11" });
+        logger.error("Error capturado: " + (error && error.message), { controller: "dte_11", action: "postDte11" });
       }
       //enviamos correo a contabilidad para que corrigan porque esta rechazado
     } else if (_respuestaMH.estado === "PROCESADO") {
@@ -293,6 +294,7 @@ const _fechaFac = await SqlFactura(_factura, empresa[0].esquemaBD);
       );
       const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
+      fs.mkdirSync(path.dirname(newfile), { recursive: true });
       fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
       if (empresa[0].ambiente === "00") {
         await emailEnviado(

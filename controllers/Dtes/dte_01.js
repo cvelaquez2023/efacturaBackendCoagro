@@ -290,6 +290,7 @@ const postDte01 = async (req, res) => {
         );
         const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
+        fs.mkdirSync(path.dirname(newfile), { recursive: true });
         fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
         await emailRechazo(
           _identificacion.numeroControl,
@@ -314,7 +315,7 @@ const postDte01 = async (req, res) => {
         });
         return;
       } catch (error) {
-        logger.error("Error capturado", { controller: "dte_01", action: "postDte01" });
+        logger.error("Error capturado: " + (error && error.message), { controller: "dte_01", action: "postDte01" });
       }
     } else {
       if (_respuestaMH.estado === "RECHAZADO") {
@@ -327,6 +328,7 @@ const postDte01 = async (req, res) => {
           );
           const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
+          fs.mkdirSync(path.dirname(newfile), { recursive: true });
           fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
           await emailRechazo(
             _identificacion.numeroControl,
@@ -352,7 +354,7 @@ const postDte01 = async (req, res) => {
           });
           return;
         } catch (error) {
-          logger.error("Error capturado", { controller: "dte_01", action: "postDte01" });
+          logger.error("Error capturado: " + (error && error.message), { controller: "dte_01", action: "postDte01" });
         }
         //enviamos correo a contabilidad para que corrigan porque esta rechazado
       } else if (_respuestaMH.estado === "PROCESADO") {
@@ -375,6 +377,7 @@ const postDte01 = async (req, res) => {
         );
         const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
+        fs.mkdirSync(path.dirname(newfile), { recursive: true });
         fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
         let _correo = "";
         if (_receptor.correo == undefined || _receptor.correo == null) {
@@ -434,6 +437,7 @@ const postDte01 = async (req, res) => {
     );
     const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
+    fs.mkdirSync(path.dirname(newfile), { recursive: true });
     fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
     // Antes llamaba a emailEnviado con argumentos que no corresponden
     await emailContingencia(
