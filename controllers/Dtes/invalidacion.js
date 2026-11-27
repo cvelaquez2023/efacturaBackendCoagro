@@ -11,6 +11,7 @@ const {
 const moment = require("moment");
 const doc = require("pdfkit");
 const { emailInvalidado } = require("../../utils/email");
+const { numeroControl } = require("../../utils/numeroControl");
 const logger = require("../../utils/logger");
 const { notifyError } = require("../../utils/errorNotifier");
 
@@ -54,26 +55,50 @@ const postInvalidar = async (req, res) => {
     const fechaFormateada = fecha.format("YYYY-MM-DD");
     const horaFormateada = fecha.format("HH:mm:ss");
 
-    const _identificacion = {
-      version: empresa[0].versionInva,
-      ambiente: empresa[0].ambiente,
-      codigoGeneracion: _codigoGeneracion,
-      fecAnula: datos[0].fecEmi,
-      horAnula: horaFormateada,
-    };
+    // Normativa DTE v2.0: evento de invalidación v3
+    const _v3 = Number(empresa[0].versionInva) >= 3;
 
-    const _emisor = {
-      nit: empresa[0].nit,
-      nombre: empresa[0].nombre,
-      tipoEstablecimiento: empresa[0].tipoestablecimiento,
-      nomEstablecimiento: empresa[0].nombreComercial,
-      codEstableMH: "M001",
-      codEstable: empresa[0].codestable,
-      codPuntoVentaMH: "P001",
-      codPuntoVenta: empresa[0].codPuntoVenta,
-      telefono: empresa[0].telefono,
-      correo: empresa[0].correoDte,
-    };
+    const _identificacion = _v3
+      ? {
+          version: Number(empresa[0].versionInva),
+          ambiente: empresa[0].ambiente,
+          codigoGeneracion: _codigoGeneracion,
+          // v3: fecha/hora de generación del evento (antes fecAnula/horAnula)
+          fecEmi: fechaFormateada,
+          horEmi: horaFormateada,
+          fusion: null, // solo para absorbentes de sociedades fusionadas
+        }
+      : {
+          version: empresa[0].versionInva,
+          ambiente: empresa[0].ambiente,
+          codigoGeneracion: _codigoGeneracion,
+          fecAnula: datos[0].fecEmi,
+          horAnula: horaFormateada,
+        };
+
+    const _emisor = _v3
+      ? {
+          nit: empresa[0].nit,
+          nombre: empresa[0].nombre,
+          codEstableMH: empresa[0].codestableceMh || "M001",
+          codEstable: empresa[0].codestable,
+          codPuntoVentaMH: empresa[0].codPuntoVentaMh || "P001",
+          codPuntoVenta: empresa[0].codPuntoVenta,
+          telefono: empresa[0].telefono,
+          correo: empresa[0].correoDte,
+        }
+      : {
+          nit: empresa[0].nit,
+          nombre: empresa[0].nombre,
+          tipoEstablecimiento: empresa[0].tipoestablecimiento,
+          nomEstablecimiento: empresa[0].nombreComercial,
+          codEstableMH: "M001",
+          codEstable: empresa[0].codestable,
+          codPuntoVentaMH: "P001",
+          codPuntoVenta: empresa[0].codPuntoVenta,
+          telefono: empresa[0].telefono,
+          correo: empresa[0].correoDte,
+        };
     if (datos[0].tipoDoc === "11") {
       _dui = datosDte[0].nit;
       _tipoDo = "37";
@@ -103,7 +128,7 @@ const postInvalidar = async (req, res) => {
       tipoDte: datos[0].tipoDoc,
       codigoGeneracion: datos[0].codigoGeneracion,
       selloRecibido: datos[0].selloRecibido,
-      numeroControl: documento.replace(_ano2, "-"),
+      numeroControl: _v3 ? numeroControl(documento) : documento.replace(_ano2, "-"),
       fecEmi: datos[0].fecEmi,
       montoIva: iva,
       codigoGeneracionR: null,
@@ -113,9 +138,11 @@ const postInvalidar = async (req, res) => {
       telefono: datosDte[0].telefono,
       correo: datosDte[0].correo,
     };
+    // v3 ya no lleva montoIva
+    if (_v3) delete _documento.montoIva;
 
     const _motivo = {
-      tipoAnulacion: tipoAnulacion,
+      tipoAnulacion: _v3 ? Number(tipoAnulacion) : tipoAnulacion,
       motivoAnulacion: motivoAnulacion,
       nombreResponsable: nombreResponsable,
       tipDocResponsable: tipoDocResponsable,
@@ -166,10 +193,12 @@ const postInvalidar = async (req, res) => {
 
     const postInvaliddardte = async () => {
       try {
-        const response = await fetch(
-          "https://api.dtes.mh.gob.sv/fesv/anulardte",
-          requestOptions
-        );
+        // Antes iba siempre a producción, aun con ambiente de pruebas
+        const url =
+          empresa[0].ambiente === "00"
+            ? "https://apitest.dtes.mh.gob.sv/fesv/anulardte"
+            : "https://api.dtes.mh.gob.sv/fesv/anulardte";
+        const response = await fetch(url, requestOptions);
         const data = await response.json();
         return data;
       } catch (error) {

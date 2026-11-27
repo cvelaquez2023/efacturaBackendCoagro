@@ -11,6 +11,7 @@ const { sequelize } = require("../config/mssql");
 const { QueryTypes } = require("sequelize");
 const { Sqlempresa } = require("../sqltx/sql");
 const { numeroControl } = require("./numeroControl");
+const { ubicacion, apendiceExtra, observacionesPdf } = require("./pdfV2");
 
 // Logo de la empresa emisora (empresa.logoUrl guarda base64). Sin logo, queda en blanco.
 const getLogoBase64 = (empresa) => {
@@ -310,6 +311,11 @@ const generaPdf = async (datos, _ano, empresa_id) => {
     apDirecion: ApDirecion,
     zona: ApMunicipio,
     needsSecondPage: prodlist.length >= 6,
+    // DTE v2.0: solo se agregan (vacíos en documentos v1 -> no se imprimen)
+    ubicacionEmisor: await ubicacion(_dteEmisior[0].direccion_depa, _dteEmisior[0].direccion_dist),
+    ubicacionReceptor: await ubicacion(_dteReceptor[0].direccion_depa, _dteReceptor[0].direccion_dist),
+    observacionesPdf: observacionesPdf(ApObservaciones),
+    apendiceExtra: apendiceExtra(_apendice),
   };
 
   const compiledHtml = hbs.compile(html)({ products: obj });
@@ -638,6 +644,11 @@ const generaPdf05 = async (datos, _ano, _empresa) => {
     descripcion: ApDescripcion,
     cliente: ApCliente,
     apDirecion: ApDirecion,
+    // DTE v2.0: solo se agregan (vacíos en documentos v1 -> no se imprimen)
+    ubicacionEmisor: await ubicacion(_dteEmisior[0].direccion_depa, _dteEmisior[0].direccion_dist),
+    ubicacionReceptor: await ubicacion(_dteReceptor[0].direccion_depa, _dteReceptor[0].direccion_dist),
+    // La caja de apéndice ya muestra vendedor-nombre, observación, cliente y dirección
+    apendiceExtra: apendiceExtra(_apendice, ["NOMBRE", "DIRECION"]),
   };
 
   const compiledHtml = hbs.compile(html)({ products: obj });
@@ -665,7 +676,7 @@ const generaPdf14 = async (datos, _ano, _empresa) => {
   const _idDte = _dte[0].Dte_Id;
 
   const _dteSujetoExcluido = await sequelize.query(
-    `SELECT tipoDocumento,nit, nombre,codActividad,descActividad,direccion_depa,direccion_muni,direccion_compl,telefono,correo  FROM dte.dbo.subjetoExcluido  WHERE dte_Id=${_idDte} `,
+    `SELECT *  FROM dte.dbo.subjetoExcluido  WHERE dte_Id=${_idDte} `,
     { type: QueryTypes.SELECT },
   );
 
@@ -785,6 +796,12 @@ const generaPdf14 = async (datos, _ano, _empresa) => {
     reteRenta: _dteResumen[0].reteRenta.toFixed(2),
     totalPagar: _dteResumen[0].totalPagar.toFixed(2),
     totalLetras: _dteResumen[0].totalLetras,
+    // DTE v2.0: solo se agregan (vacíos en documentos v1 -> no se imprimen)
+    ubicacionEmisor: await ubicacion(_dteEmisior[0].direccion_depa, _dteEmisior[0].direccion_dist),
+    ubicacionReceptor: await ubicacion(
+      _dteSujetoExcluido[0].direccion_depa,
+      _dteSujetoExcluido[0].direccion_dist
+    ),
   };
 
   const compiledHtml = hbs.compile(html)({ products: obj });

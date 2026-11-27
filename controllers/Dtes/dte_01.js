@@ -10,7 +10,9 @@ const {
   emisor,
   receptor,
   apendice,
+  esV2,
 } = require("../../config/MH");
+const { aV2 } = require("../../utils/dteV2");
 const { emailRechazo, emailEnviado } = require("../../utils/email");
 const fs = require("fs");
 const path = require("path");
@@ -77,7 +79,7 @@ const postDte01 = async (req, res) => {
 
   const _documentoRelacionado = null;
   const _emisor = await emisor(empresa, "01");
-  const _receptor = await receptor(_factura, "01", empresa[0].esquemaBD);
+  const _receptor = await receptor(_factura, "01", empresa[0].esquemaBD, empresa);
   const _otrosDocumentos = null;
   const _ventaTercero = null;
   const _cuerpo = await cuerpoDoc(
@@ -116,7 +118,7 @@ const postDte01 = async (req, res) => {
     _correoVendedor = "factura@coagro.com";
   }
 
-  const dte = {
+  const dteV1 = {
     identificacion: _identificacion,
     documentoRelacionado: _documentoRelacionado,
     emisor: _emisor,
@@ -128,6 +130,8 @@ const postDte01 = async (req, res) => {
     extension: _extension,
     apendice: _apendice,
   };
+  // DTE v2.0: se firma, envía y entrega la versión ajustada; BD sigue con _resumen
+  const dte = esV2(empresa, "01") ? aV2(dteV1, "01") : dteV1;
   //procedemos a recibir la firma del documento
   //convertimos descodificamos firma
   logger.debug("Debug dte", { controller: "dte_01", action: "postDte01" });
@@ -266,17 +270,9 @@ const postDte01 = async (req, res) => {
       _factura,
       _empresa
     );
+    // El JSON entregado es el mismo que se firmó
     const JsonCliente = {
-      identificacion: _identificacion,
-      documentoRelacionado: _documentoRelacionado,
-      emisor: _emisor,
-      receptor: _receptor,
-      otrosDocumentos: _otrosDocumentos,
-      ventaTercero: _ventaTercero,
-      cuerpoDocumento: _cuerpo,
-      resumen: _resumen,
-      extension: _extension,
-      apendice: _apendice,
+      ...dte,
       respuestaMh: _respuestaMH,
       firma: _firma,
     };
@@ -426,17 +422,9 @@ const postDte01 = async (req, res) => {
       }
     }
   } else {
+    // El JSON entregado es el mismo que se firmó (antes iba sin apendice)
     const JsonCliente = {
-      identificacion: _identificacion,
-      documentoRelacionado: null,
-      emisor: _emisor,
-      receptor: _receptor,
-      otrosDocumentos: null,
-      ventaTercero: null,
-      cuerpoDocumento: _cuerpo,
-      resumen: _resumen,
-      extension: null,
-      apendice: null,
+      ...dte,
       firma: _firma,
     };
     //  await fac01(_factura);

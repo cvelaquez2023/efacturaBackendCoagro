@@ -235,6 +235,7 @@
             <div class="field-row"><span class="label">NRC:</span> {{products.nrcEmisor}}</div>
             <div class="field-row"><span class="label">Actividad Económica:</span> {{products.actividadEmisor}}</div>
             <div class="field-row"><span class="label">Dirección:</span> {{products.direccionEmisor}}</div>
+            {{#if products.ubicacionEmisor}}<div class="field-row"><span class="label">Distrito:</span> {{products.ubicacionEmisor}}</div>{{/if}}
             <div class="field-row"><span class="label">Teléfono:</span> {{products.telefonoEmisor}}</div>
             <div class="field-row"><span class="label">Correo Electrónico:</span> {{products.correoEmisor}}</div>
             <div class="field-row"><span class="label">Nombre Comercial:</span> {{products.nombreComercialEmisor}}</div>
@@ -247,6 +248,7 @@
             <div class="field-row"><span class="label">NIT o DUI:</span> {{products.nit}}</div>
             <div class="field-row"><span class="label">Actividad Económica:</span> {{products.descActividad}}</div>
             <div class="field-row"><span class="label">Dirección:</span> {{products.direccion_compl}}</div>
+            {{#if products.ubicacionReceptor}}<div class="field-row"><span class="label">Distrito:</span> {{products.ubicacionReceptor}}</div>{{/if}}
             <div class="field-row"><span class="label">Teléfono:</span> {{products.telefono}}</div>
             <div class="field-row"><span class="label">Correo Electrónico:</span> {{products.correo}}</div>
           </div>

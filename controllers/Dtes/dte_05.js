@@ -6,7 +6,9 @@ const {
   firmaMH,
   autorizacionMh,
   apendice,
+  esV2,
 } = require("../../config/MH");
+const { aV2 } = require("../../utils/dteV2");
 const {
   auxiliarCCModel,
   documentoModel,
@@ -113,7 +115,7 @@ const postDte05 = async (req, res) => {
   }
 
   const _emisor = await emisor(empresa, "05");
-  const _receptor = await receptor(_factura, "05", empresa[0].esquemaBD);
+  const _receptor = await receptor(_factura, "05", empresa[0].esquemaBD, empresa);
   const _cuerpo = await cuerpoDoc(
     _factura,
     _docRela,
@@ -142,7 +144,7 @@ const postDte05 = async (req, res) => {
     const _docCC = await SqlDocumentoCC(_factura, empresa[0].esquemaBD);
     fechaFull = _docCC[0].FECHAFULL;
   }
-  const dte = {
+  const dteV1 = {
     identificacion: _identificacion,
     documentoRelacionado: _docRela,
     emisor: _emisor,
@@ -153,6 +155,8 @@ const postDte05 = async (req, res) => {
     extension: _extension,
     apendice: _apendice,
   };
+  // DTE v2.0: se firma, envía y entrega la versión ajustada; BD sigue con _resumen
+  const dte = esV2(empresa, "05") ? aV2(dteV1, "05") : dteV1;
   const datafirma = {
     nit: empresa[0].nit,
     activo: true,
@@ -296,17 +300,11 @@ await guardarObservacionesMH(
       _empresa
     );
 
+    // El JSON entregado es el mismo que se firmó
     const JsonCliente = {
-      identificacion: _identificacion,
-      documentoRelacionado: _docRela,
-      emisor: _emisor,
-      receptor: _receptor,
-      ventaTercero: null,
-      cuerpoDocumento: _cuerpo,
-      resumen: _resumen,
-      extension: null,
-      apendice: null,
+      ...dte,
       respuestamh: _respuestaMH,
+      firma: _firma,
     };
 
     if (
@@ -411,17 +409,9 @@ await guardarObservacionesMH(
       }
     }
   } else {
+    // El JSON entregado es el mismo que se firmó
     const JsonCliente = {
-      identificacion: _identificacion,
-      documentoRelacionado: null,
-      emisor: _emisor,
-      receptor: _receptor,
-      otrosDocumentos: null,
-      ventaTercero: null,
-      cuerpoDocumento: _cuerpo,
-      resumen: _resumen,
-      extension: null,
-      apendice: _apendice,
+      ...dte,
       firma: _firma,
     };
 

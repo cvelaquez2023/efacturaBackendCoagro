@@ -8,7 +8,9 @@ const {
   firmaMH,
   autorizacionMh,
   apendice,
+  esV2,
 } = require("../../config/MH");
+const { aV2 } = require("../../utils/dteV2");
 const { sequelize } = require("../../config/mssql");
 const { subtipoDocCCModel } = require("../../models");
 const logger = require("../../utils/logger");
@@ -78,7 +80,7 @@ const postDte11 = async (req, res) => {
   }
   const _identificacion = await identificacion("11", _empresa, _factura);
   const _emisor = await emisor(empresa, "11");
-  const _receptor = await receptor(_factura, "11", empresa[0].esquemaBD);
+  const _receptor = await receptor(_factura, "11", empresa[0].esquemaBD, empresa);
   const _cuerpo = await cuerpoDoc(_factura, empresa[0].esquemaBD);
   const _resumen = await resumen(_factura, empresa[0].esquemaBD);
 
@@ -90,7 +92,7 @@ const postDte11 = async (req, res) => {
   );
 
 
-  const dte = {
+  const dteV1 = {
     identificacion: _identificacion,
     emisor: _emisor,
     receptor: _receptor,
@@ -100,6 +102,8 @@ const postDte11 = async (req, res) => {
     resumen: _resumen,
     apendice: _apendice,
   };
+  // DTE v2.0 (FEX v3): se firma, envía y entrega la versión ajustada
+  const dte = esV2(empresa, "11") ? aV2(dteV1, "11") : dteV1;
 
 logger.debug("Debug dete", { controller: "dte_11", action: "postDte11" });
 const _fechaFac = await SqlFactura(_factura, empresa[0].esquemaBD);
@@ -219,14 +223,9 @@ const _fechaFac = await SqlFactura(_factura, empresa[0].esquemaBD);
   await guardarRespuestaMH(_respuestaMH, _factura, _empresa);
   await updateDte(_respuestaMH, _factura, _empresa);
   await guardarObservacionesMH(_respuestaMH.observaciones, _factura, _empresa);
+  // El JSON entregado es el mismo que se firmó
   const JsonCliente = {
-    identificacion: _identificacion,
-    emisor: _emisor,
-    receptor: _receptor,
-    ventaTercero: null,
-    cuerpoDocumento: _cuerpo,
-    resumen: _resumen,
-    apendice: null,
+    ...dte,
     respuestaMh: _respuestaMH,
   };
 
