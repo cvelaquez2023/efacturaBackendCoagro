@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Evento de Invalidación</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #000000;
+      font-size: 10px;
+      line-height: 1.25;
+      -webkit-print-color-adjust: exact;
+    }
+    .container { width: 100%; margin: 0 auto; padding: 0 10mm; }
+    .doc-title { font-size: 11px; font-weight: bold; text-transform: uppercase; }
+    .doc-subtitle { font-size: 11px; font-weight: bold; text-transform: uppercase; display: inline; }
+    .linea-separadora { border-top: 1px solid #000; margin: 8px 0; width: 100%; }
+    .section-title { font-size: 10.5px; font-weight: bold; text-transform: uppercase; margin-top: 3px; margin-bottom: 4px; page-break-after: avoid; }
+    .row-text { margin-bottom: 1.5px; font-size: 9.5px; }
+    .label { font-weight: bold; }
+    .grid-2col { width: 100%; border-collapse: collapse; page-break-inside: avoid; }
+    .grid-2col td { width: 50%; vertical-align: top; padding: 0 4px; }
+    .grid-2col td:first-child { padding-left: 0; }
+    .grid-2col td:last-child { padding-right: 0; }
+    .qr { width: 85px; height: 85px; }
+    .qr svg { width: 85px; height: 85px; }
+    .header-logo-qr { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+    .header-logo-qr td { vertical-align: middle; padding: 0; }
+    .header-logo-qr .qr-td { text-align: right; padding-right: 25mm; }
+    .estado {
+      display: inline-block;
+      border: 1px solid #000;
+      padding: 2px 6px;
+      font-weight: bold;
+      font-size: 10px;
+      margin-top: 4px;
+    }
+    .nota { font-size: 8.5px; margin-top: 10px; text-align: justify; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- ENCABEZADO: Logo izquierda, QR derecha (consulta pública del DTE invalidado) -->
+    <table class="header-logo-qr">
+      <tr>
+        <td style="width: 50%;">
+          {{#if products.logoUrl}}
+            <img src="{{products.logoUrl}}" alt="Logo" style="max-width: 150px; max-height: 100px;" />
+          {{/if}}
+        </td>
+        <td class="qr-td" style="width: 50%;">
+          <div class="qr">[QR CODE]</div>
+        </td>
+      </tr>
+    </table>
+
+    <div class="doc-title">DOCUMENTO TRIBUTARIO ELECTRÓNICO <span class="doc-subtitle">EVENTO DE INVALIDACIÓN</span></div>
+    <div class="estado">DOCUMENTO INVALIDADO</div>
+
+    <!-- IDENTIFICACIÓN DEL EVENTO -->
+    <div style="margin-top: 6px;">
+      <div class="section-title">IDENTIFICACIÓN DEL EVENTO</div>
+      <table class="grid-2col">
+        <tr>
+          <td>
+            <div class="row-text"><span class="label">Código de Generación:</span> {{products.codigoGeneracion}}</div>
+            <div class="row-text"><span class="label">Sello de Recepción:</span> {{products.selloRecibido}}</div>
+            <div class="row-text"><span class="label">Versión:</span> {{products.version}}</div>
+          </td>
+          <td>
+            <div class="row-text"><span class="label">Fecha del evento:</span> {{products.fecEmi}}</div>
+            <div class="row-text"><span class="label">Hora del evento:</span> {{products.horEmi}}</div>
+            <div class="row-text"><span class="label">Fecha y hora de procesamiento:</span> {{products.fhProcesamiento}}</div>
+            <div class="row-text"><span class="label">Ambiente:</span> {{products.ambiente}}</div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="linea-separadora"></div>
+
+    <!-- EMISOR Y RECEPTOR -->
+    <table class="grid-2col">
+      <tr>
+        <td>
+          <div class="section-title">DATOS DEL EMISOR</div>
+          <div class="row-text"><span class="label">Razón Social:</span> {{products.nombreEmisor}}</div>
+          <div class="row-text"><span class="label">NIT:</span> {{products.nitEmisor}}</div>
+          <div class="row-text"><span class="label">Establecimiento MH:</span> {{products.codEstableMH}} &nbsp;|&nbsp; <span class="label">Punto de venta MH:</span> {{products.codPuntoVentaMH}}</div>
+          <div class="row-text"><span class="label">Teléfono:</span> {{products.telefonoEmisor}}</div>
+          <div class="row-text"><span class="label">Correo:</span> {{products.correoEmisor}}</div>
+        </td>
+        <td>
+          <div class="section-title">DATOS DEL RECEPTOR</div>
+          <div class="row-text"><span class="label">Nombre o Razón Social:</span> {{products.nombreReceptor}}</div>
+          <div class="row-text"><span class="label">{{products.tipoDocumentoReceptor}}:</span> {{products.numDocumentoReceptor}}</div>
+          <div class="row-text"><span class="label">Teléfono:</span> {{products.telefonoReceptor}}</div>
+          <div class="row-text"><span class="label">Correo:</span> {{products.correoReceptor}}</div>
+        </td>
+      </tr>
+    </table>
+
+    <div class="linea-separadora"></div>
+
+    <!-- DOCUMENTO INVALIDADO -->
+    <div class="section-title">DOCUMENTO TRIBUTARIO ELECTRÓNICO INVALIDADO</div>
+    <table class="grid-2col">
+      <tr>
+        <td>
+          <div class="row-text"><span class="label">Tipo de documento:</span> {{products.tipoDte}}</div>
+          <div class="row-text"><span class="label">Número de control:</span> {{products.numeroControlDte}}</div>
+          <div class="row-text"><span class="label">Código de Generación:</span> {{products.codigoGeneracionDte}}</div>
+        </td>
+        <td>
+          <div class="row-text"><span class="label">Sello de Recepción:</span> {{products.selloRecibidoDte}}</div>
+          <div class="row-text"><span class="label">Fecha de emisión:</span> {{products.fecEmiDte}}</div>
+          {{#if products.codigoGeneracionR}}
+          <div class="row-text"><span class="label">Código de Generación del DTE que lo reemplaza:</span> {{products.codigoGeneracionR}}</div>
+          {{/if}}
+        </td>
+      </tr>
+    </table>
+
+    <div class="linea-separadora"></div>
+
+    <!-- MOTIVO -->
+    <div class="section-title">MOTIVO DE LA INVALIDACIÓN</div>
+    <div class="row-text"><span class="label">Tipo de invalidación:</span> {{products.tipoAnulacion}}</div>
+    {{#if products.motivoAnulacion}}
+    <div class="row-text"><span class="label">Motivo:</span> {{products.motivoAnulacion}}</div>
+    {{/if}}
+    <table class="grid-2col" style="margin-top: 4px;">
+      <tr>
+        <td>
+          <div class="row-text"><span class="label">Responsable:</span> {{products.nombreResponsable}}</div>
+          <div class="row-text"><span class="label">{{products.tipDocResponsable}}:</span> {{products.numDocResponsable}}</div>
+        </td>
+        <td>
+          <div class="row-text"><span class="label">Solicitante:</span> {{products.nombreSolicita}}</div>
+          <div class="row-text"><span class="label">{{products.tipDocSolicita}}:</span> {{products.numDocSolicita}}</div>
+        </td>
+      </tr>
+    </table>
+
+    <div class="nota">
+      Este evento deja sin efecto el Documento Tributario Electrónico detallado. El estado del documento puede
+      consultarse en el portal del Ministerio de Hacienda con su código de generación (código QR).
+    </div>
+  </div>
+</body>
+</html>

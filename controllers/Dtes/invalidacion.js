@@ -11,7 +11,9 @@ const {
 } = require("../../sqltx/sql");
 const moment = require("moment");
 const doc = require("pdfkit");
+const path = require("path");
 const { emailInvalidado } = require("../../utils/email");
+const { guardarJsonInvalidacion, generaPdfInvalidacion } = require("../../utils/eventoInvalidacion");
 const { numeroControl } = require("../../utils/numeroControl");
 const { codigoMH, codigosDeNumeroControl } = require("../../utils/dteV2");
 const logger = require("../../utils/logger");
@@ -299,17 +301,57 @@ const postInvalidar = async (req, res) => {
         `update dte.dbo.dtes set selloRecibidoInva='${_respuestaMH.selloRecibido}',fechaHoraInva=getdate(),invalidado=1,codigoGeneracionInvalidacion='${_respuestaMH.codigoGeneracion}',estadoIvalidacion='${_respuestaMH.estado}' where Dte_id= ${_idDte}`,
         { type: QueryTypes.SELECT }
       );
-      const _parte1 =documento.substring(0, 15);
-      const _parte2 =documento.substring(19, 34);
-      const doc = _parte1 + "-" + _parte2;
-      const tipo = doc.substring(4, 6);
-      const tipoDoc = "dte" + tipo;
-      await emailInvalidado(doc, datosDte[0].correo, tipoDoc,_ano,empresa);
+      // Normativa DTE v2.0: entregar al receptor el archivo del evento y su
+      // representación gráfica. La invalidación ya tiene sello: si algo de esto
+      // falla se informa, pero la respuesta sigue siendo exitosa.
+      const _numeroControlDte = numeroControl(documento);
+      const _esquema = empresa[0].esquemaBD;
+      let _correo = { ok: false, error: "No se generaron los archivos del evento" };
+      try {
+        const jsonEvento = guardarJsonInvalidacion({
+          esquema: _esquema,
+          ano: _ano,
+          numeroControlDte: _numeroControlDte,
+          evento: datosJs,
+          firma: _firma,
+          respuestaMH: _respuestaMH,
+        });
+        const pdfEvento = await generaPdfInvalidacion({
+          esquema: _esquema,
+          ano: _ano,
+          numeroControlDte: _numeroControlDte,
+          evento: datosJs,
+          respuestaMH: _respuestaMH,
+          empresa,
+        });
+        const pdfDte = path.join(
+          __dirname,
+          `../../storage/pdf/${_esquema}/dte${datos[0].tipoDoc}/${_ano}/${_numeroControlDte}.pdf`
+        );
+        _correo = await emailInvalidado({
+          numeroControlDte: _numeroControlDte,
+          email: datosDte[0].correo,
+          nombreCliente: datosDte[0].nombre,
+          empresa,
+          jsonEvento,
+          pdfEvento,
+          pdfDte,
+        });
+      } catch (error) {
+        _correo = { ok: false, error: error.message };
+        logger.error(`Invalidación ${_numeroControlDte}: error con archivos/correo del evento: ${error.message}`, {
+          controller: "invalidacion",
+          action: "postInvalidar",
+        });
+      }
       res.send({
         errors: ["Procesado en Hacienda Aceptados"],
         result: "Procesado en Hacienda Aceptados",
         success: true,
         hacienda: true,
+        correo: _correo.ok
+          ? "Evento de invalidación enviado al receptor"
+          : `No se pudo enviar el evento al receptor: ${_correo.error}`,
       });
     } else if (_respuestaMH.estado === null) {
       res.send({

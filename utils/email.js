@@ -98,46 +98,63 @@ const emailEnviado = async (dte, email,emailv,nombreCliente, tipo,ano,empresa_id
   }
 };
 
-const emailInvalidado = async (dte, email, tipo,ano,empresa) => {
+/**
+ * Entrega del evento de invalidación al receptor (Normativa DTE v2.0):
+ * archivo del evento (JSON firmado con sello) y su representación gráfica (PDF).
+ * Si existe, también va el PDF del DTE invalidado como referencia.
+ *
+ * Antes adjuntaba solo el DTE original, con rutas que empezaban con una comilla
+ * ('"../../storage') dentro de un setTimeout: fallaba sin que nadie lo viera.
+ *
+ * opciones: { numeroControlDte, email, nombreCliente, empresa, jsonEvento, pdfEvento, pdfDte }
+ */
+const emailInvalidado = async (opciones) => {
+  const logCtx = { controller: "email", action: "emailInvalidado" };
+  const { numeroControlDte, email, nombreCliente, empresa, jsonEvento, pdfEvento, pdfDte } = opciones;
   try {
-    setTimeout(function () {
-      const data = fs.readFileSync(
-        `"../../storage/json/${empresa[0].esquemaBD}/${tipo}/aceptados/${ano}/${dte}.json`,
-        "utf8"
-      );
-      const dataPDF = fs.readFileSync(
-        `"../../storage/pdf/${empresa[0].esquemaBD}/${tipo}/${ano}/${dte}.pdf`,
-        "utf-8"
-      );
-      return transporter.sendMail({
-        from: '"Soporte Coagro S.A.de C.V." <coagrodte@gmail.com>', // sender address
-        to: email, // list of receivers
-        subject: "Envio de Dte ", // Subject line
-        attachments: [
-          {
-            filename: `${dte}.json`,
-            content: data,
-          },
+    if (!email) {
+      logger.warn(`Invalidación ${numeroControlDte}: el receptor no tiene correo, no se envía`, logCtx);
+      return { ok: false, error: "Receptor sin correo" };
+    }
+    const nombreEmpresa = empresa[0].nombre;
+    const attachments = [
+      {
+        filename: `INVALIDACION-${numeroControlDte}.json`,
+        content: fs.readFileSync(jsonEvento, "utf8"),
+        contentType: "application/json",
+      },
+      {
+        filename: `INVALIDACION-${numeroControlDte}.pdf`,
+        path: pdfEvento,
+        contentType: "application/pdf",
+      },
+    ];
+    if (pdfDte && fs.existsSync(pdfDte)) {
+      attachments.push({ filename: `${numeroControlDte}.pdf`, path: pdfDte, contentType: "application/pdf" });
+    }
 
-          {
-            filename: `${dte}.pdf`,
-            path: `"../../storage/pdf/${empresa[0].esquemaBD}/${tipo}/${ano}/${dte}.pdf`,
-            contentType: "application/pdf",
-          },
-        ],
-        html: `
-                     Estimado Cliente , por este medio hacemos de su Conocimineto que se invalido  su Comprobante de Documento Tributario Eletronico,
-                     <br>
-                     <br>
-                     Agradecemos su preferencia a nuestros productos y servicios   
-                     <br>
-                     <br>
-                     <span>Coagro S.A. de C.V.</span> Soporte
-                    `, // html body
-      });
-    }, 15000);
+    const info = await transporter.sendMail({
+      from: { name: `Soporte ${nombreEmpresa}`, address: empresa[0].correoDte },
+      to: email,
+      subject: `Invalidación de DTE ${numeroControlDte}`,
+      attachments,
+      html: `
+                   Estimado Cliente${nombreCliente ? ` ${nombreCliente}` : ""}, por este medio hacemos de su conocimiento
+                   que el Documento Tributario Electrónico <b>${numeroControlDte}</b> ha sido invalidado ante el
+                   Ministerio de Hacienda.
+                   <br><br>
+                   Adjuntamos el archivo del Evento de Invalidación y su representación gráfica.
+                   <br><br>
+                   Agradecemos su preferencia a nuestros productos y servicios
+                   <br><br>
+                   <span>${nombreEmpresa}</span> Soporte
+                  `,
+    });
+    logger.info(`Correo de invalidación ${numeroControlDte} enviado a ${email} id ${info.messageId}`, logCtx);
+    return { ok: true };
   } catch (error) {
-    console.log(error);
+    logger.error(`Error enviando correo de invalidación ${numeroControlDte} a ${email}: ${error.message}`, logCtx);
+    return { ok: false, error: error.message };
   }
 };
 
