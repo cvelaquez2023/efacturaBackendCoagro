@@ -7,11 +7,13 @@ const {
   SqlDteRecptor02,
   SqlDte,
   SqlDteSujetoExcluido,
+  SqlDteIdentificacion,
 } = require("../../sqltx/sql");
 const moment = require("moment");
 const doc = require("pdfkit");
 const { emailInvalidado } = require("../../utils/email");
 const { numeroControl } = require("../../utils/numeroControl");
+const { codigoMH, codigosDeNumeroControl } = require("../../utils/dteV2");
 const logger = require("../../utils/logger");
 const { notifyError } = require("../../utils/errorNotifier");
 
@@ -104,13 +106,19 @@ const postInvalidar = async (req, res) => {
     // Normativa DTE v2.0: evento de invalidación v3
     const _v3 = Number(empresa[0].versionInva) >= 3;
 
+    // Fecha de emisión del DTE tal como se envió a Hacienda (dte.dbo.identificacion).
+    // MH la compara: con la fecha de hoy rechazó "[identificacion.fecEmi] DATO NO
+    // COINCIDE CON DTE". En pruebas el DTE lleva fecha fija (config/MH.js), por eso
+    // no se usa dtes.fechaemision salvo como respaldo.
+    const _fecEmiDte = _v3 ? await fechaEmisionEnviada(datos[0].Dte_id, datos[0].fecEmi) : null;
+
     const _identificacion = _v3
       ? {
           version: Number(empresa[0].versionInva),
           ambiente: empresa[0].ambiente,
           codigoGeneracion: _codigoGeneracion,
-          // v3: fecha/hora de generación del evento (antes fecAnula/horAnula)
-          fecEmi: fechaFormateada,
+          // v3: fecEmi = fecha de emisión del DTE a invalidar (igual que fecAnula en v1)
+          fecEmi: _fecEmiDte,
           horEmi: horaFormateada,
           fusion: null, // solo para absorbentes de sociedades fusionadas
         }
@@ -122,14 +130,19 @@ const postInvalidar = async (req, res) => {
           horAnula: horaFormateada,
         };
 
+    // Códigos MH con formato S028 / P001: primero los del número de control del
+    // documento que se invalida (mismo establecimiento), luego los de la empresa
+    // y por último los que MH aceptaba en v1.
+    const _codDoc = codigosDeNumeroControl(documento);
+
     const _emisor = _v3
       ? {
           nit: empresa[0].nit,
           nombre: empresa[0].nombre,
-          codEstableMH: empresa[0].codestableceMh || "M001",
-          codEstable: empresa[0].codestable,
-          codPuntoVentaMH: empresa[0].codPuntoVentaMh || "P001",
-          codPuntoVenta: empresa[0].codPuntoVenta,
+          codEstableMH: codigoMH("estable", [_codDoc.estable, empresa[0].codestableceMh], "M001"),
+          codEstable: empresa[0].codestable ? String(empresa[0].codestable).trim() : null,
+          codPuntoVentaMH: codigoMH("puntoVenta", [_codDoc.puntoVenta, empresa[0].codPuntoVentaMh], "P001"),
+          codPuntoVenta: empresa[0].codPuntoVenta ? String(empresa[0].codPuntoVenta).trim() : null,
           telefono: empresa[0].telefono,
           correo: empresa[0].correoDte,
         }
@@ -175,7 +188,7 @@ const postInvalidar = async (req, res) => {
       codigoGeneracion: datos[0].codigoGeneracion,
       selloRecibido: datos[0].selloRecibido,
       numeroControl: _v3 ? numeroControl(documento) : documento.replace(_ano2, "-"),
-      fecEmi: datos[0].fecEmi,
+      fecEmi: _v3 ? _fecEmiDte : datos[0].fecEmi,
       montoIva: iva,
       codigoGeneracionR: _codigoR,
       tipoDocumento: _tipoDo,
@@ -310,6 +323,26 @@ const postInvalidar = async (req, res) => {
     if (res && !res.headersSent) {
       res.status(500).send({ messaje: "Error interno del servidor", result: false, error: error.message });
     }
+  }
+};
+
+// "YYYY-MM-DD" desde Date (columna date/datetime) o texto, sin corrimiento de zona
+const aFechaISO = (valor) => {
+  if (!valor) return null;
+  if (valor instanceof Date) return moment.utc(valor).format("YYYY-MM-DD");
+  const texto = String(valor).trim();
+  return /^\d{4}-\d{2}-\d{2}/.test(texto) ? texto.substring(0, 10) : null;
+};
+
+// fecEmi con que el DTE se transmitió a Hacienda. Si hay varios intentos
+// guardados, el último es el que obtuvo el sello.
+const fechaEmisionEnviada = async (idDte, respaldo) => {
+  try {
+    const filas = await SqlDteIdentificacion(idDte);
+    const ultima = filas.length ? aFechaISO(filas[filas.length - 1].fecEmi) : null;
+    return ultima || aFechaISO(respaldo) || respaldo;
+  } catch (error) {
+    return aFechaISO(respaldo) || respaldo;
   }
 };
 

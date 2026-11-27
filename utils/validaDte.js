@@ -90,6 +90,25 @@ const formatear = (e) => {
   return `${ruta}: ${e.message}`;
 };
 
+// Reglas que Hacienda aplica en su servidor y no vienen en el esquema JSON.
+// Rechazo real (2026-11-27): "#/emisor/codEstableMH no cumple el formato
+// requerido" con "0001"; exige el formato del número de control (S028 / P001).
+const reglasExtraMH = (json, tipo) => {
+  const errores = [];
+  if (tipo !== "invalidacion" && tipo !== "contingencia") return errores;
+  const e = json?.emisor || {};
+  const revisar = (campo, formato, ejemplo) => {
+    const v = e[campo];
+    if (v === null && tipo === "contingencia") return;
+    if (!formato.test(String(v ?? ""))) {
+      errores.push(`/emisor/${campo}: "${v}" no cumple el formato MH (ej. ${ejemplo})`);
+    }
+  };
+  revisar("codEstableMH", /^[MBSP][0-9]{3}$/, "S028");
+  revisar("codPuntoVentaMH", /^P[0-9]{3}$/, "P001");
+  return errores;
+};
+
 /**
  * @param {object} json  DTE o evento sin firmar
  * @param {object} [opc] { tipo, version, ref }  ref = texto para el log (factura, etc.)
@@ -112,9 +131,10 @@ const validaDte = (json, opc = {}) => {
       });
       return { valido: true, omitido: true, errores: [] };
     }
-    if (validar(json)) return { valido: true, omitido: false, errores: [] };
+    const errores = validar(json) ? [] : validar.errors.map(formatear);
+    errores.push(...reglasExtraMH(json, tipo));
+    if (errores.length === 0) return { valido: true, omitido: false, errores: [] };
 
-    const errores = validar.errors.map(formatear);
     logger.warn(
       `DTE ${clave}${ref} no cumple el esquema MH (${errores.length}): ${errores.join(" | ")}`,
       { controller: "validaDte" }
