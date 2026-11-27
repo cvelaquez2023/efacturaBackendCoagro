@@ -18,20 +18,23 @@ const buscarProveedoresSoftland = async (req, res) => {
 };
 
 const getProveedorSoftland = async (req, res) => {
-const User = req.cliente;
-
-  const empresa = await Sqlempresa(User[0].empresa)
- 
-      try {
-        const proveedor = await SqlProveedor(req.params.id,empresa[0].esquemaBD)
-        if (proveedor.length > 0) {
-            res.send({ result: proveedor, success: true });
-        } else {
-            res.send({ result: ['no existe'], success: false });
-        }
-
-    } catch (error) {
-        console.log(error);
+  try {
+    const User = req.cliente;
+    const empresa = await Sqlempresa(User[0].empresa);
+    const proveedor = await SqlProveedor(req.params.id, empresa[0].esquemaBD);
+    if (proveedor.length > 0) {
+      res.send({ result: proveedor, success: true });
+    } else {
+      res.send({ result: ["no existe"], success: false });
     }
+  } catch (error) {
+    // Antes solo se registraba y no se respondía: el formulario quedaba esperando
+    console.log(error);
+    res.send({
+      result: [],
+      success: false,
+      errors: [`Error al consultar el proveedor en el ERP: ${error.message}`],
+    });
+  }
 };
 module.exports = { getProveedorSoftland, buscarProveedoresSoftland };
