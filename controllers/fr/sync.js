@@ -557,31 +557,55 @@ const getSyncPrecios = async (req, res) => {
 //
 // GET /fr/sync/cobros   (header Authorization: Bearer <token movil>)
 // Todos los documentos de los clientes de las rutas de la handheld (RUTA_CLIENTE), sin importar
-// de que vendedor/ruta sea el documento: alimenta la pantalla de clientes (todo lo que debe el
-// cliente). Lo del vendedor de la handheld (meta diaria) sale de /fr/sync/cobrosAgente.
+// de que vendedor/ruta sea el documento: alimenta la pantalla de clientes y el calendario de
+// cobros ("Todos los documentos"; "Mis documentos" lo filtra la app con VENDEDOR = vendedores).
 //
-// Tabla: erpadmin.alCXC_PEN_COB (documentos de CxC con saldo, por ruta y cliente).
-// PK: (COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT). COD_ZON es la ruta del documento.
+// Tabla: erpadmin.alCXC_PEN_COB (documentos de CxC con saldo, por ruta y cliente). La llena
+// erpadmin.CargaAlMovil desde CINCOH.DOCUMENTOS_CC (solo TIPO 'FAC', SALDO > 0), una fila por
+// documento, de cualquier vendedor (docs/fr-cobros-vendedor.sql).
 //
 // Respuesta:
 // {
 //   success: true,
 //   errors: [],
 //   result: {
-//     documentos: [{ COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT, AGENTE, NOMBRE_AGENTE, SALDO_LOCAL, ... }] -> alCXC_PEN_COB
+//     documentos: [{ COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT, AGENTE, NOMBRE_AGENTE,
+//                    VENDEDOR, NOMBRE_VENDEDOR, SALDO_LOCAL, ... }] -> alCXC_PEN_COB
+//     vendedores: ["VCZ"]   (vendedores del ERP de la handheld, igual que /fr/sync/metas)
 //   }
 // }
 //
 // Notas:
-//  - COD_ZON puede ser una ruta de otro vendedor: la handheld debe unir con el cliente solo por
-//    COD_CLT, no por COD_ZON + COD_CLT.
-//  - AGENTE/NOMBRE_AGENTE: agente dueño de la ruta del documento (RUTA_ASIGNADA_RT); null si la ruta no
-//    tiene asignacion activa.
+//  - Una fila por documento (COD_TIP_DC + NUM_DOC + COD_CLT).
+//  - COD_ZON: siempre una ruta de la handheld donde esta el cliente (la del documento si es de la
+//    handheld; si no, la primera ruta de la handheld que tiene al cliente).
+//  - AGENTE/NOMBRE_AGENTE: agente dueño de la ruta a la que la carga asigno el documento
+//    (alCXC_PEN_COB.COD_ZON, antes del ajuste de arriba); null si esa ruta no tiene asignacion activa.
+//  - VENDEDOR/NOMBRE_VENDEDOR: vendedor de la factura en el ERP (DOCUMENTOS_CC.VENDEDOR).
+//  - vendedores: [] si la handheld no tiene agente o el agente no esta en AGENTE_ASOC_RT (no es error).
 
 const CAMPOS_PEN_COB = `COD_CIA, COD_ZON, COD_TIP_DC, NUM_DOC, COD_CLT, SALDO_DOLAR, SALDO_LOCAL,
   MONTO_DOLAR, MONTO_LOCAL, FEC_DOC_FT, FEC_PRO, FEC_VEN, IND_MON, IND_ANL, TIP_CMB_DOL,
   CONDICION_PAGO, SUBTOTAL, TIP_CMB_LOC, CLASE_DOCUMENTO, INCOTERMS, FORMAS_PAGO,
   NATURALEZA_OPERACION, CUFE, CODIGOQR, INDICADOR_FACTURACION`;
+
+// Agentes de ruteo de la handheld del token (RUTA_ASIGNADA_RT.AGENTE, sin repetir).
+const agentesDeLaHandheld = (req) => [
+  ...new Set(req.mobile.rutas.map((r) => String(r.AGENTE ?? "").trim()).filter(Boolean)),
+];
+
+// RUTA_ASIGNADA_RT.AGENTE es el CODIGO de ruteo (AGENTE_ASOC_RT.CODIGO), que puede ser un
+// alias distinto al vendedor del ERP (ej. AG01 -> VBV). Devuelve los vendedores del ERP.
+const vendedoresErp = async (agentes) => {
+  if (!agentes.length) return [];
+  const asociados = await sequelize.query(
+    `SELECT DISTINCT LTRIM(RTRIM(AGENTE)) AS AGENTE
+       FROM COAGRO2.erpadmin.AGENTE_ASOC_RT
+      WHERE CODIGO IN (:agentes)`,
+    { replacements: { agentes }, type: QueryTypes.SELECT }
+  );
+  return asociados.map((a) => a.AGENTE).filter(Boolean);
+};
 
 // Nombre del agente de la ruta (A = RUTA_ASIGNADA_RT): A.AGENTE es el codigo de ruteo
 // (AGENTE_ASOC_RT.CODIGO) y el nombre vive en AGENTE_RT, por el AGENTE del ERP.
@@ -591,27 +615,52 @@ const JOIN_NOMBRE_AGENTE = `
 
 const getSyncCobros = async (req, res) => {
   try {
-    // 1) Clientes asignados a las rutas de la handheld
+    const texto = (v) => String(v ?? "").trim();
+
+    // 1) Clientes asignados a las rutas de la handheld, con sus rutas (orden por ruta)
     const asignaciones = await rutaClienteModel.findAll({
-      attributes: ["CLIENTE"],
+      attributes: ["CLIENTE", "RUTA"],
       where: { RUTA: req.mobile.codigosRuta },
+      order: [["RUTA", "ASC"]],
       raw: true,
     });
-    const codigos = [...new Set(asignaciones.map((a) => String(a.CLIENTE).trim()))];
+    const rutasDelCliente = new Map();
+    for (const a of asignaciones) {
+      const cliente = texto(a.CLIENTE);
+      if (!rutasDelCliente.has(cliente)) rutasDelCliente.set(cliente, []);
+      rutasDelCliente.get(cliente).push(texto(a.RUTA));
+    }
+    const codigos = [...rutasDelCliente.keys()];
 
     // 2) Todos sus documentos, de cualquier ruta/vendedor, por lotes
-    const documentos = await porLotes(codigos, (lote) =>
-      sequelize.query(
-        `SELECT ${CAMPOS_PEN_COB.replace(/(\w+)/g, "P.$1")}, A.AGENTE, AR.NOMBRE AS NOMBRE_AGENTE
-           FROM COAGRO2.erpadmin.alCXC_PEN_COB P
-           LEFT JOIN COAGRO2.erpadmin.RUTA_ASIGNADA_RT A ON A.RUTA = P.COD_ZON AND A.ACTIVA = 'S'
-           ${JOIN_NOMBRE_AGENTE}
-          WHERE P.COD_CLT IN (:lote)`,
-        { replacements: { lote }, type: QueryTypes.SELECT }
-      )
-    );
+    const [filas, vendedores] = await Promise.all([
+      porLotes(codigos, (lote) =>
+        sequelize.query(
+          `SELECT ${CAMPOS_PEN_COB.replace(/(\w+)/g, "P.$1")}, A.AGENTE, AR.NOMBRE AS NOMBRE_AGENTE,
+                  LTRIM(RTRIM(P.VENDEDOR)) AS VENDEDOR, LTRIM(RTRIM(P.NOMBRE_VENDEDOR)) AS NOMBRE_VENDEDOR
+             FROM COAGRO2.erpadmin.alCXC_PEN_COB P
+             LEFT JOIN COAGRO2.erpadmin.RUTA_ASIGNADA_RT A ON A.RUTA = P.COD_ZON AND A.ACTIVA = 'S'
+             ${JOIN_NOMBRE_AGENTE}
+            WHERE P.COD_CLT IN (:lote)`,
+          { replacements: { lote }, type: QueryTypes.SELECT }
+        )
+      ),
+      vendedoresErp(agentesDeLaHandheld(req)),
+    ]);
+
+    // 3) Una fila por documento y COD_ZON siempre una ruta de la handheld que tiene al cliente.
+    const vistos = new Set();
+    const documentos = [];
+    for (const d of filas) {
+      const llave = `${texto(d.COD_TIP_DC)}|${texto(d.NUM_DOC)}|${texto(d.COD_CLT)}`;
+      if (vistos.has(llave)) continue;
+      vistos.add(llave);
+      const rutas = rutasDelCliente.get(texto(d.COD_CLT)) || [];
+      if (rutas.length && !rutas.includes(texto(d.COD_ZON))) d.COD_ZON = rutas[0];
+      documentos.push(d);
+    }
+
     // El orden se aplica aqui porque los lotes llegan por separado.
-    const texto = (v) => String(v ?? "").trim();
     documentos.sort(
       (a, b) =>
         texto(a.COD_CLT).localeCompare(texto(b.COD_CLT)) ||
@@ -620,7 +669,7 @@ const getSyncCobros = async (req, res) => {
     );
 
     res.send({
-      result: { documentos },
+      result: { documentos, vendedores },
       success: true,
       errors: [],
     });
@@ -630,6 +679,76 @@ const getSyncCobros = async (req, res) => {
       result: {},
       success: false,
       errors: ["Error al preparar la sincronizacion de cobros"],
+    });
+  }
+};
+
+//
+// GET /fr/sync/cobrosOtros   (header Authorization: Bearer <token movil>)
+// Abonos que OTRAS handhelds ya registraron (recibos de POST /fr/sync/enviar -> depositos) y que
+// control aun no aplica, a documentos que esta handheld recibe en /fr/sync/cobros. La app los
+// descuenta del saldo para saber si otro vendedor ya cobro.
+//
+// Tablas:
+//   - erpadmin.alCXC_ENC_DEP / alCXC_DET_DEP -> recibo y sus lineas (se unen por NUM_DEP + CTA_BCO)
+//   - erpadmin.alCXC_PEN_COB    -> COD_TIP_DC, NUM_DOC, COD_CLT, COD_CIA (los mismos de /cobros)
+//   - erpadmin.RUTA_CLIENTE     -> solo documentos de clientes de las rutas de la handheld
+//   - erpadmin.RUTA_ASIGNADA_RT -> ruta que hizo el recibo (por E.HandHeld) y su agente
+//   - erpadmin.AGENTE_ASOC_RT / AGENTE_RT -> vendedor del ERP de ese agente y su nombre
+//
+// Filtro: ISNULL(DOC_PRO, 'N') = 'N' (al aplicarlo control pasa a 'S' y el saldo de PEN_COB ya lo
+// trae descontado) y HandHeld distinta a la del token (los suyos la app ya los tiene).
+// alCXC_ENC_DEP no tiene columna de anulacion: un recibo con DOC_PRO distinto de 'N' no viene.
+//
+// COD_ZON: ENC_DEP no guarda ruta, sale de la handheld del recibo (RUTA_ASIGNADA_RT activa); si
+// tiene varias, la que tiene al cliente y luego la menor. Null si la handheld ya no tiene rutas.
+//
+// Respuesta:
+// { result: { abonos: [{ COD_CIA, COD_TIP_DC, NUM_DOC, COD_CLT, COD_ZON, CTA_BCO, NUM_DEP, FEC_DEP,
+//                        IND_MON, MONTO, VENDEDOR, NOMBRE_VENDEDOR }] } }
+// Una fila por recibo (CTA_BCO + NUM_DEP) y documento; MONTO = MON_EFE + MON_CHE + MON_DEP + MON_TRA
+// de sus lineas, en la moneda IND_MON del recibo. FEC_DEP 'YYYY-MM-DD HH:MM:SS'. Sin abonos -> [].
+//
+const getSyncCobrosOtros = async (req, res) => {
+  try {
+    const handheld = String((req.mobile.handheld && req.mobile.handheld.HANDHELD) || "").trim();
+    const rutas = req.mobile.codigosRuta.length ? req.mobile.codigosRuta : [""];
+
+    const abonos = await sequelize.query(
+      `SELECT LTRIM(RTRIM(P.COD_CIA)) AS COD_CIA, LTRIM(RTRIM(P.COD_TIP_DC)) AS COD_TIP_DC,
+              LTRIM(RTRIM(P.NUM_DOC)) AS NUM_DOC, LTRIM(RTRIM(P.COD_CLT)) AS COD_CLT,
+              LTRIM(RTRIM(R.RUTA)) AS COD_ZON, LTRIM(RTRIM(E.CTA_BCO)) AS CTA_BCO,
+              LTRIM(RTRIM(E.NUM_DEP)) AS NUM_DEP, CONVERT(varchar(19), E.FEC_DEP, 120) AS FEC_DEP,
+              LTRIM(RTRIM(E.IND_MON)) AS IND_MON,
+              CAST(SUM(ISNULL(D.MON_EFE, 0) + ISNULL(D.MON_CHE, 0) + ISNULL(D.MON_DEP, 0)
+                       + ISNULL(D.MON_TRA, 0)) AS float) AS MONTO,
+              LTRIM(RTRIM(R.VENDEDOR)) AS VENDEDOR, LTRIM(RTRIM(R.NOMBRE_VENDEDOR)) AS NOMBRE_VENDEDOR
+         FROM COAGRO2.erpadmin.alCXC_DET_DEP D
+         JOIN COAGRO2.erpadmin.alCXC_ENC_DEP E ON E.NUM_DEP = D.NUM_DEP AND E.CTA_BCO = D.CTA_BCO
+         JOIN COAGRO2.erpadmin.alCXC_PEN_COB P ON P.NUM_DOC = D.NUM_DOC
+         OUTER APPLY (SELECT TOP 1 A.RUTA, AA.AGENTE AS VENDEDOR, AR.NOMBRE AS NOMBRE_VENDEDOR
+                        FROM COAGRO2.erpadmin.RUTA_ASIGNADA_RT A
+                        ${JOIN_NOMBRE_AGENTE}
+                       WHERE A.HANDHELD = E.HandHeld AND A.ACTIVA = 'S'
+                       ORDER BY CASE WHEN EXISTS (SELECT 1 FROM COAGRO2.erpadmin.RUTA_CLIENTE RC
+                                                   WHERE RC.RUTA = A.RUTA AND RC.CLIENTE = P.COD_CLT)
+                                     THEN 0 ELSE 1 END, A.RUTA) R
+        WHERE ISNULL(E.DOC_PRO, 'N') = 'N'
+          AND ISNULL(E.HandHeld, '') <> :handheld
+          AND P.COD_CLT IN (SELECT CLIENTE FROM COAGRO2.erpadmin.RUTA_CLIENTE WHERE RUTA IN (:rutas))
+        GROUP BY P.COD_CIA, P.COD_TIP_DC, P.NUM_DOC, P.COD_CLT, R.RUTA, E.CTA_BCO, E.NUM_DEP,
+                 E.FEC_DEP, E.IND_MON, R.VENDEDOR, R.NOMBRE_VENDEDOR
+        ORDER BY P.COD_CLT, P.NUM_DOC, E.FEC_DEP, E.NUM_DEP`,
+      { replacements: { handheld, rutas }, type: QueryTypes.SELECT }
+    );
+
+    res.send({ result: { abonos }, success: true, errors: [] });
+  } catch (error) {
+    console.log(error);
+    res.send({
+      result: {},
+      success: false,
+      errors: ["Error al preparar la sincronizacion de abonos de otras handhelds"],
     });
   }
 };
@@ -2059,9 +2178,7 @@ const entero = (valor) => (/^\d+$/.test(String(valor ?? "").trim()) ? Number(val
 
 const getSyncMetas = async (req, res) => {
   try {
-    const agentes = [
-      ...new Set(req.mobile.rutas.map((r) => String(r.AGENTE ?? "").trim()).filter(Boolean)),
-    ];
+    const agentes = agentesDeLaHandheld(req);
     if (!agentes.length) {
       return res.send({
         result: {},
@@ -2082,15 +2199,8 @@ const getSyncMetas = async (req, res) => {
       return res.send({ result: {}, success: false, errors: ["mes debe ser un numero entre 1 y 12"] });
     }
 
-    // RUTA_ASIGNADA_RT.AGENTE es el CODIGO de ruteo (AGENTE_ASOC_RT.CODIGO), que puede ser un
-    // alias distinto al vendedor del ERP (ej. AG01 -> VBV). La meta se guarda con el del ERP.
-    const asociados = await sequelize.query(
-      `SELECT DISTINCT LTRIM(RTRIM(AGENTE)) AS AGENTE
-         FROM COAGRO2.erpadmin.AGENTE_ASOC_RT
-        WHERE CODIGO IN (:agentes)`,
-      { replacements: { agentes }, type: QueryTypes.SELECT }
-    );
-    const vendedores = asociados.map((a) => a.AGENTE).filter(Boolean);
+    // La meta se guarda con el vendedor del ERP, no con el codigo de ruteo.
+    const vendedores = await vendedoresErp(agentes);
     if (!vendedores.length) {
       return res.send({
         result: {},
@@ -2280,6 +2390,7 @@ module.exports = {
   getSyncArticulos,
   getSyncCobros,
   getSyncCobrosAgente,
+  getSyncCobrosOtros,
   getSyncConsecutivos,
   getSyncConfiguracion,
   getSyncClientesCia,

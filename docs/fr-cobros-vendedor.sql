@@ -1,0 +1,597 @@
+-- CargaAlMovil: calendario de cobros por vendedor (/fr/sync/cobros y /fr/sync/cobrosOtros).
+-- 1) alCXC_PEN_COB gana VENDEDOR (documentos_cc.VENDEDOR) y NOMBRE_VENDEDOR (CINCOH.VENDEDOR.NOMBRE).
+--    Asi la app movil sigue leyendo solo erpadmin.
+-- 2) Se quita el filtro PRIORIDAD < 3: entran los documentos de todos los vendedores de los clientes
+--    de rutas activas (antes se perdian las facturas de un vendedor que no tiene ruta con ese cliente).
+--    Sigue siendo una fila por documento (RN = 1) y solo TIPO 'FAC'.
+-- Lo demas del procedimiento queda IGUAL (copiado de la definicion actual, nov 2026).
+-- Orden: correr TODO el script y luego exec erpadmin.CargaAlMovil, ANTES de publicar el backend
+-- (el backend lee las columnas nuevas).
+USE COAGRO2;
+GO
+IF COL_LENGTH('erpadmin.alCXC_PEN_COB', 'VENDEDOR') IS NULL
+    ALTER TABLE erpadmin.alCXC_PEN_COB ADD VENDEDOR varchar(4) NULL;
+IF COL_LENGTH('erpadmin.alCXC_PEN_COB', 'NOMBRE_VENDEDOR') IS NULL
+    ALTER TABLE erpadmin.alCXC_PEN_COB ADD NOMBRE_VENDEDOR varchar(40) NULL;
+GO
+
+
+
+ALTER PROCEDURE [erpadmin].[CargaAlMovil]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+
+	delete ERPADMIN.visitas_rt;
+    -- 1. La CTE (WITH) se define PRIMERO y se antecede con ';' por seguridad
+    ;WITH CalculoInicial AS (
+        SELECT 
+            RC.RUTA, 
+            'CINCOH' AS EMPRESA, 
+            RC.CLIENTE, 
+            RC.ORDEN,
+            CASE 
+                WHEN RC.DIA <= 3 THEN DATEADD(DAY, RC.DIA + 4, CAST(GETDATE() AS DATE))
+                ELSE DATEADD(DAY, RC.DIA - 3, CAST(GETDATE() AS DATE))
+            END AS FECHA_CALCULADA
+        FROM ERPADMIN.RUTA_CLIENTE RC
+        INNER JOIN ERPADMIN.RUTA_RT R 
+            ON RC.RUTA = R.RUTA
+        WHERE R.ACTIVA = 'S'
+    )
+    -- 2. El INSERT recibe el resultado final del CTE
+    INSERT INTO ERPADMIN.visitas_rt (
+        RUTA, 
+        COMPANIA, 
+        CLIENTE, 
+        ORDEN_PLAN, 
+        FECHA_PLAN
+    )
+    SELECT DISTINCT
+        RUTA,
+        EMPRESA,
+        CLIENTE,
+        ORDEN,
+        CASE 
+            WHEN DATEPART(WEEKDAY, FECHA_CALCULADA) = 6 THEN DATEADD(DAY, 2, FECHA_CALCULADA)
+            WHEN DATEPART(WEEKDAY, FECHA_CALCULADA) IN (7, 1) THEN DATEADD(DAY, 1, FECHA_CALCULADA)
+            ELSE FECHA_CALCULADA
+        END AS FECHA_VISITA
+    FROM CalculoInicial;
+
+	--INICIO CLIENTES
+	delete [erpadmin].[CLIENTE_CIA];
+	INSERT INTO [erpadmin].[CLIENTE_CIA]
+           ([COD_CLT]
+           ,[COD_CIA]
+           ,[LST_PRE]
+           ,[IND_MON]
+           ,[NOM_CTO]
+           ,[NUM_TEL]
+           ,[COD_CND]
+           ,[DIA_CRE]
+           ,[SAL_CRE]
+           ,[LIM_CRE]
+           ,[POR_EXC_VT]
+           ,[POR_EXC_CS]
+           ,[COD_PAIS]
+           ,[COD_TIP_CL]
+           ,[DIR_EMB_DEFAULT]
+           ,[DESCUENTO]
+           ,[BODEGA_CONSIGNA]
+           ,[MULT_MON]
+           ,[ACEPTA_FRACCIONES]
+           ,[TIPO_CONTRIBUYENTE]
+           ,[CONTRIBUYENTE]
+           ,[DIVISION_GEOGRAFICA1]
+           ,[DIVISION_GEOGRAFICA2]
+           ,[REGIMEN_TRIB]
+           ,[LOCALIZACION_CONSIGNA]
+           ,[CODIGO]
+           ,[RAZONSOCIAL]
+           ,[USA_MONTO_TOPE]
+           ,[MONTO_TOPE]
+           ,[CATEGORIA_TIPO_NIT]
+           ,[SUBTIPODOC],
+		   division_geografica3 ,
+		   codActividad ,
+          desActividad ,
+          nomEncargadoCompras ,
+          telEncargadoCompras ,
+          nomEncargadoPagos ,
+          telEncargadoPagos ,
+         doc_pro 
+		   )
+     SELECT 
+		cl.CLIENTE,
+		'CINCOH' AS EMPRESA,
+		v.VERSION,
+		'L' AS TIPO_PRECIO,
+		'ND' AS TIPO_DOCUMENTO,
+		cl.TELEFONO1,
+		cl.CONDICION_PAGO,
+		cp.DIAS_NETO,
+		cl.SALDO,
+		cl.LIMITE_CREDITO,
+		0.00 AS EXENTO,
+		0.00 AS GRAVADO,
+		cl.PAIS,
+		cl.CATEGORIA_CLIENTE,
+		cl.DIR_EMB_DEFAULT,
+		cl.DESCUENTO,
+		'BCE' AS BODEGA,
+		'N' AS MULTMONEDA,
+		cl.ACEPTA_BACKORDER,
+		'F' AS TIPOCONTRIBUYENTE,
+		cl.CONTRIBUYENTE,
+		cl.DIVISION_GEOGRAFICA1,
+		cl.DIVISION_GEOGRAFICA2,
+		'' AS REGIMEN,
+		'' AS LOCALIZACION,
+		cl.RUBRO4_CLI,
+		cl.RUBRO1_CLI,
+		'' AS USA_TOPE,
+		0 AS MONTO_TOPE,
+		'' AS CATEGORIATIPONIT,
+		cl.SUBTIPODOC,
+		cl.DIVISION_GEOGRAFICA3,
+		rubro8_cliente ,rubro9_cliente, rubro11_cliente , rubro12_cliente, 
+        rubro13_cliente ,rubro14_cliente ,
+		'S' as doc_pro
+	FROM cincoh.CLIENTE cl
+		INNER JOIN cincoh.CONDICION_PAGO cp 
+		ON cl.CONDICION_PAGO = cp.CONDICION_PAGO
+		INNER JOIN ERPADMIN.CLIENTE_ASOC_RT rt 
+		ON cl.CLIENTE = rt.CLIENTE 
+		AND rt.COMPANIA = 'COAGRO'
+		INNER JOIN (
+    -- Subconsulta para obtener únicamente la última versión activa por nivel y moneda
+			SELECT NIVEL_PRECIO, MONEDA, MAX(VERSION) AS VERSION
+			FROM cincoh.VERSION_NIVEL
+			WHERE ESTADO = 'A'
+			GROUP BY NIVEL_PRECIO, MONEDA
+		) v 
+		ON v.NIVEL_PRECIO = cl.NIVEL_PRECIO 
+		AND v.MONEDA = cl.MONEDA_NIVEL;
+
+       delete erpadmin.cliente
+     insert into erpadmin.cliente (COD_ZON,COD_CLT,FEC_PLN,NOM_CLT,DIR_CLT,TIPO_IMPUESTO,TIPO_TARIFA,PORC_TARIFA, NIVEL_PRECIO )
+     SELECT 
+      rt.RUTA, 
+      cl.CLIENTE, 
+	  rt.FECHA_PLAN, 
+      cl.NOMBRE, 
+      LTRIM(REPLACE(CAST(cl.DIRECCION AS VARCHAR(MAX)), 'DETALLE:', '')) AS DIRECCION ,
+	  '' as tipo_Impuesto,'' as tipo_Tarifa,0 as porc_tarifa, cl.nivel_Precio
+     FROM erpadmin.visitas_rt rt
+     JOIN cincoh.cliente cl 
+    ON LTRIM(RTRIM(rt.CLIENTE)) = LTRIM(RTRIM(cl.CLIENTE));
+
+
+	DELETE ERPADMIN.DES_BON_CLIENTE
+INSERT INTO ERPADMIN.DES_BON_CLIENTE (
+  COMPANIA, COD_ZON, COD_CLI, CLIENTE, NOMBRE, DETALLE_DIRECCION, ALIAS, CONTACTO,
+  DIR_EMB_DEFAULT, FECHA_INGRESO, MULTIMONEDA, MONEDA, SALDO, SALDO_LOCAL, SALDO_DOLAR,
+  SALDO_CREDITO, LIMITE_CREDITO, EXCEDER_LIMITE, CONDICION_PAGO, NIVEL_PRECIO, DESCUENTO,
+  MONEDA_NIVEL, PAIS, ZONA, RUTA, VENDEDOR, COBRADOR, ACTIVO, EXENTO_IMPUESTOS,
+  CATEGORIA_CLIENTE, CLASE_ABC, E_MAIL, ES_CORPORACION, RUBRO1_CLIENTE, RUBRO2_CLIENTE,
+  RUBRO3_CLIENTE, RUBRO1_CLI, RUBRO2_CLI, RUBRO3_CLI, RUBRO4_CLI, RUBRO5_CLI,
+  RUBRO4_CLIENTE, RUBRO5_CLIENTE, RUBRO6_CLIENTE, RUBRO7_CLIENTE, RUBRO8_CLIENTE,
+  RUBRO9_CLIENTE, RUBRO10_CLIENTE, GLN, UBICACION, LOCAL, RUBRO11_CLIENTE,
+  RUBRO12_CLIENTE, RUBRO13_CLIENTE, RUBRO14_CLIENTE, RUBRO15_CLIENTE, RUBRO16_CLIENTE,
+  RUBRO17_CLIENTE, RUBRO18_CLIENTE, RUBRO19_CLIENTE, RUBRO20_CLIENTE, ACEPTA_DOC_ELECTRONICO,
+  CODIGO_IMPUESTO, MOROSO, NRC, GIRO, ACTIVIDAD_ECONOMICA
+)
+ SELECT 
+CA.COMPANIA,CLIP.COD_ZON,CLIP.COD_CLT,CLIE.CLIENTE,CLIE.NOMBRE,CLIE.DETALLE_DIRECCION,CLIE.ALIAS,CONTACTO,DIR_EMB_DEFAULT,CLIE.FECHA_INGRESO,MULTIMONEDA,MONEDA,SALDO,SALDO_LOCAL,SALDO_DOLAR,SALDO_CREDITO,LIMITE_CREDITO,EXCEDER_LIMITE,CONDICION_PAGO,
+  clie.NIVEL_PRECIO,DESCUENTO,MONEDA_NIVEL,CLIE.PAIS,ZONA,RUTA,VENDEDOR,COBRADOR,CLIE.ACTIVO,EXENTO_IMPUESTOS,CATEGORIA_CLIENTE,CLASE_ABC,E_MAIL,ES_CORPORACION,RUBRO1_CLIENTE,RUBRO2_CLIENTE,RUBRO3_CLIENTE,RUBRO1_CLI,RUBRO2_CLI,RUBRO3_CLI,RUBRO4_CLI,RUBRO5_CLI,RUBRO4_CLIENTE,RUBRO5_CLIENTE,RUBRO6_CLIENTE,
+  RUBRO7_CLIENTE,RUBRO8_CLIENTE,RUBRO9_CLIENTE,RUBRO10_CLIENTE,CLIE.GLN,CLIE.UBICACION,LOCAL,RUBRO11_CLIENTE,RUBRO12_CLIENTE,RUBRO13_CLIENTE,RUBRO14_CLIENTE,RUBRO15_CLIENTE,RUBRO16_CLIENTE,RUBRO17_CLIENTE,RUBRO18_CLIENTE,RUBRO19_CLIENTE,RUBRO20_CLIENTE,CLIE.ACEPTA_DOC_ELECTRONICO,CODIGO_IMPUESTO,MOROSO,NITP.NRC, LEFT(NITP.GIRO,40) as giro,LEFT( RUBRO8_CLIENTE,10) as actividad
+ FROM 
+ ERPADMIN.CLIENTE CLIP 
+ INNER JOIN ERPADMIN.CLIENTE_ASOC_RT CA ON CLIP.COD_CLT = CA.CLIENTE 
+ INNER JOIN cincoh.CLIENTE CLIE ON CLIE.CLIENTE = CA.CODIGO
+ INNER JOIN cincoh.NIT NITP ON CLIE.CONTRIBUYENTE = NITP.NIT
+ WHERE CLIE.ACTIVO = 'S' 
+ AND COD_ZON = '001' 
+ AND 0=(SELECT COUNT(1) from ERPADMIN.DES_BON_CLIENTE WHERE  COMPANIA=CA.COMPANIA AND COD_ZON= CLIP.COD_ZON AND COD_CLI=CLIP.COD_CLT AND CLIENTE=CLIE.CLIENTE) 
+ ORDER BY CA.COMPANIA
+
+
+	--FIN CLIENTE
+
+
+
+
+	--INICIO ARTICULOS
+	DELETE ERPADMIN.ARTICULO;
+	INSERT INTO ERPADMIN.ARTICULO (
+    GRP_ART, 
+    COD_ART, 
+    COD_CIA, 
+    UND_EMP, 
+    EMP_ALM, 
+    EMP_DET, 
+    COD_BAR, 
+    DES_ART, 
+    COD_FAM, 
+    COD_CLS, 
+    IMPUESTO, 
+    USA_LOTES, 
+    COSTO_LOCAL, 
+    COSTO_DOLAR, 
+    FACTOR_PRECIO, 
+    ORDEN_ART, 
+    FACTOR_VENTA, 
+    ARTICULO_ENVASE, 
+    TIPO, 
+    CODIGO_RETENCION, 
+    RETENCION_VENTA, 
+    RETENCION_COMPRA, 
+    MODELO_RETENCION, 
+    CLASIFICACION3, 
+    CLASIFICACION4, 
+    CLASIFICACION5, 
+    CLASIFICACION6, 
+    CANASTA_BASICA, 
+    ES_OTRO_CARGO, 
+    TIPO_VENTA
+)
+SELECT 
+    'P01' AS GRP_ART,
+    ARTICULO AS COD_ART,
+    'COAGRO' AS COD_CIA,
+    FACTOR_EMPAQUE AS UND_EMP, 
+    UNIDAD_ALMACEN AS EMP_ALM,
+    UNIDAD_VENTA AS EMP_DET,
+    CODIGO_BARRAS_INVT AS COD_BAR,
+    DESCRIPCION AS DES_ART, 
+    CLASIFICACION_1 AS COD_FAM, 
+    CLASIFICACION_2 AS COD_CLS,
+    IMPUESTO, 
+    USA_LOTES, 
+    COSTO_PROM_LOC AS COSTO_LOCAL, 
+    COSTO_PROM_DOL AS COSTO_DOLAR, 
+    FACTOR_VENTA AS FACTOR_PRECIO, 
+    'ZZZ' AS ORDEN_ART, 
+    FACTOR_VENTA, 
+    NULL AS ARTICULO_ENVASE,
+    TIPO, 
+    CODIGO_RETENCION, 
+    RETENCION_VENTA, 
+    NULL AS RETENCION_COMPRA,
+    MODELO_RETENCION,
+    CLASIFICACION_3 AS CLASIFICACION3, 
+    CLASIFICACION_4 AS CLASIFICACION4, 
+    CLASIFICACION_5 AS CLASIFICACION5, 
+    CLASIFICACION_6 AS CLASIFICACION6,
+    CANASTA_BASICA,
+    ES_OTRO_CARGO,
+    TIPO_VENTA 
+FROM CINCOH.ARTICULO  
+WHERE TIPO IN ('T', 'K') 
+  AND ACTIVO = 'S';
+
+delete erpadmin.GRUPO_ART_ASOC_RT
+insert into erpadmin.GRUPO_ART_ASOC_RT (GRUPO_ARTICULO,COMPANIA,ARTICULO) 
+SELECT DISTINCT
+    'P01' AS GRUPO, 
+    'COAGRO' AS COMPAMIA,
+    a.ARTICULO 
+FROM cincoh.ARTICULO_PRECIO a 
+WHERE EXISTS (
+    SELECT 1 
+    FROM cincoh.VERSION_NIVEL b 
+    WHERE a.NIVEL_PRECIO = b.NIVEL_PRECIO 
+      AND b.ESTADO = 'A'
+);
+
+---existencia 
+delete erpadmin.articulo_existencia
+insert into erpadmin.articulo_existencia (articulo,compania,bodega,existencia)
+select articulo,'COAGRO',BODEGA,CANT_DISPONIBLE FROM CINCOH.EXISTENCIA_BODEGA b WHERE B.CANT_DISPONIBLE>0 AND b.BODEGA='BCE' AND exists (select *  from cincoh.articulo a where a.articulo=b.articulo and a.tipo in ('T','K') and a.activo='S'  )
+
+
+--EXISTENCIA LOTE
+DELETE ERPADMIN.articulo_existencia_LOTE
+
+INSERT INTO ERPADMIN.articulo_existencia_LOTE (COMPANIA,BODEGA,ARTICULO,LOCALIZACION,LOTE,FECHA_VENCIMIENTO,EXISTENCIA)
+SELECT 
+    'COAGRO' AS EMPRESA,
+    EL.BODEGA,
+    EL.ARTICULO,
+    EL.LOCALIZACION,
+    EL.LOTE, 
+    LO.FECHA_VENCIMIENTO, 
+    EL.CANT_DISPONIBLE
+FROM CINCOH.EXISTENCIA_LOTE EL
+INNER JOIN CINCOH.LOTE LO 
+    ON EL.ARTICULO = LO.ARTICULO 
+   AND EL.LOTE = LO.LOTE
+WHERE EL.BODEGA = 'BCE'
+  AND EL.CANT_DISPONIBLE > 0;
+
+  --articulo precios
+  DELETE ERPADMIN.ARTICULO_PRECIO
+INSERT INTO ERPADMIN.ARTICULO_PRECIO (COMPANIA, ARTICULO, NIVEL_PRECIO, MONEDA, PRECIO, MARGEN_UTILIDAD,VERSION,VERSION_ARTICULO,fecha_inicio_version_articulo,fecha_final_version_articulo) 
+ SELECT 
+    'COAGRO' AS COMPANIA, 
+    ART.ARTICULO,
+    ART.NIVEL_PRECIO, 
+    ART.MONEDA, 
+    ART.PRECIO, 
+    ART.MARGEN_UTILIDAD,
+    ART.VERSION,
+    ART.VERSION_ARTICULO,
+    ART.FECHA_INICIO,
+    ART.FECHA_FIN
+FROM CINCOH.ARTICULO_PRECIO ART
+-- Cruce con la versión del nivel de precio para validar aprobación
+INNER JOIN CINCOH.VERSION_NIVEL VN
+    ON ART.NIVEL_PRECIO = VN.NIVEL_PRECIO
+   AND ART.MONEDA = VN.MONEDA
+   AND ART.VERSION = VN.VERSION
+WHERE ART.MONEDA = 'D'
+  AND VN.estado = 'A' -- Filtra únicamente versiones aprobadas
+  -- Filtro de fecha de vigencia del precio
+  AND CAST(GETDATE() AS DATE) BETWEEN CAST(ART.FECHA_INICIO AS DATE) AND CAST(ART.FECHA_FIN AS DATE)
+  -- Validación de artículos asociados a rutas activas de COAGRO
+  AND EXISTS (
+      SELECT 1
+      FROM ERPADMIN.GRUPO_ART_ASOC_RT GAR
+      INNER JOIN ERPADMIN.RUTA_ASIGNADA_RT RAR 
+          ON GAR.COMPANIA = RAR.COMPANIA 
+         AND GAR.GRUPO_ARTICULO = RAR.GRUPO_ARTICULO
+      INNER JOIN ERPADMIN.RUTA_RT RRT 
+          ON RAR.RUTA = RRT.RUTA
+      WHERE GAR.COMPANIA = 'COAGRO'
+        AND GAR.ARTICULO = ART.ARTICULO
+        AND RAR.ACTIVA = 'S'
+        AND RRT.ACTIVA = 'S'
+  );
+
+
+
+	--FIN ARTICULOS
+	
+
+DELETE ERPADMIN.DIVISION_GEOGRAFICA1
+ INSERT INTO ERPADMIN.DIVISION_GEOGRAFICA1  ( PAIS, COMPANIA, DIVISION_GEOGRAFICA1,NOMBRE )  SELECT G.PAIS, 'COAGRO',G.DIVISION_GEOGRAFICA1, G.NOMBRE  FROM CINCOH.DIVISION_GEOGRAFICA1 G
+
+ DELETE ERPADMIN.DIVISION_GEOGRAFICA2
+ INSERT INTO ERPADMIN.DIVISION_GEOGRAFICA2  ( PAIS, COMPANIA, DIVISION_GEOGRAFICA1,DIVISION_GEOGRAFICA2,NOMBRE )  SELECT G.PAIS, 'COAGRO',G.DIVISION_GEOGRAFICA1,G.DIVISION_GEOGRAFICA2, G.NOMBRE  FROM CINCOH.DIVISION_GEOGRAFICA2 G
+
+
+ --NIVEL PRECIOS
+ DELETE ERPADMIN.NIVEL_LISTA
+ INSERT INTO ERPADMIN.NIVEL_LISTA (COMPANIA, NIVEL_PRECIO, MONEDA, LISTA, IMPUESTO1_INCLUIDO) 
+	SELECT 'COAGRO',NIVEL_PRECIO,MONEDA,1,'N' FROM CINCOH.NIVEL_PRECIO
+
+
+	DELETE ERPADMIN.SUBTIPO_DOC_CC_FR 
+ INSERT INTO ERPADMIN.SUBTIPO_DOC_CC_FR 
+ (TIPO,SUBTIPO,DESCRIPCION,TIPO_DOCUMENTO,COMPANIA,CALCULA_IMP2) 
+ SELECT TIPO,SUBTIPO,DESCRIPCION,TIPO_DOCUMENTO,'COAGRO' as "COMPANIA",CALCULA_IMP2 
+ FROM CINCOH.SUBTIPO_DOC_CC
+
+
+
+	DELETE ERPADMIN.alFAC_RUTA_ORDEN;
+	INSERT INTO ERPADMIN.alFAC_RUTA_ORDEN (COD_ZON, COD_CLT, ORDEN, DIA)
+SELECT DISTINCT 
+    RC.RUTA, 
+    RC.CLIENTE, 
+    RC.ORDEN, 
+    SUBSTRING('YLMKJVSD', RC.DIA + 1, 1) AS DIA_LETRA
+FROM ERPADMIN.RUTA_CLIENTE RC
+INNER JOIN ERPADMIN.RUTA_RT R 
+    ON RC.RUTA = R.RUTA
+WHERE R.ACTIVA = 'S'
+  AND NOT EXISTS (
+      SELECT 1 
+      FROM ERPADMIN.alFAC_RUTA_ORDEN A
+      WHERE A.COD_ZON = RC.RUTA 
+        AND A.COD_CLT = RC.CLIENTE
+  );
+
+  -- Documentos con saldo de los clientes de las rutas activas, de CUALQUIER vendedor (antes solo
+  -- entraban si el agente de la ruta era el COBRADOR o el VENDEDOR del documento: PRIORIDAD < 3).
+  -- Una fila por documento: la ruta del cobrador, si no la del vendedor, si no la primera ruta del cliente.
+  -- VENDEDOR / NOMBRE_VENDEDOR: vendedor de la factura en el ERP (calendario de cobros "Mis documentos").
+  delete erpadmin.alCXC_PEN_COB;
+
+   ;WITH cand AS (
+      SELECT doc.*, rc.RUTA AS RUTA_ASIG,
+             CASE WHEN ra.AGENTE = doc.COBRADOR THEN 1
+                  WHEN ra.AGENTE = doc.VENDEDOR THEN 2
+                  ELSE 3 END AS PRIORIDAD,
+             ROW_NUMBER() OVER (
+                 PARTITION BY doc.TIPO, doc.DOCUMENTO
+                 ORDER BY CASE WHEN ra.AGENTE = doc.COBRADOR THEN 1
+                               WHEN ra.AGENTE = doc.VENDEDOR THEN 2
+                               ELSE 3 END,
+                          rc.RUTA) AS RN
+      FROM CINCOH.DOCUMENTOS_CC doc
+      JOIN erpadmin.RUTA_CLIENTE rc ON rc.CLIENTE = doc.CLIENTE
+      JOIN erpadmin.RUTA_RT rt      ON rt.RUTA = rc.RUTA AND rt.ACTIVA = 'S'
+      LEFT JOIN erpadmin.RUTA_ASIGNADA_RT ra ON ra.RUTA = rc.RUTA AND ra.ACTIVA = 'S'
+      WHERE doc.SALDO > 0
+        AND doc.TIPO IN ('FAC')
+  )
+  insert into erpadmin.alCXC_PEN_COB (
+      cod_cia, [COD_ZON], [COD_TIP_DC], [NUM_DOC], [COD_CLT], [SALDO_DOLAR], [SALDO_LOCAL],
+      [MONTO_DOLAR], [MONTO_LOCAL], [FEC_DOC_FT], [FEC_PRO], [FEC_VEN], [IND_MON], [IND_ANL],
+      [TIP_CMB_DOL], [CONDICION_PAGO], [SUBTOTAL], [CLASE_DOCUMENTO], [VENDEDOR], [NOMBRE_VENDEDOR])
+  select 'COAGRO' AS EMPRESA, c.RUTA_ASIG, c.SUBTIPO, c.DOCUMENTO, c.CLIENTE,
+         c.SALDO_DOLAR, c.SALDO_DOLAR, c.MONTO_DOLAR, c.MONTO_LOCAL,
+         c.FECHA_DOCUMENTO, c.FECHA, c.FECHA_VENCE,
+         'L' AS MONEDA, 'Activo' as ind_anul, 1 as tipoCambio, c.CONDICION_PAGO,
+         c.SUBTOTAL AS TOTAL, 'N' as clase,
+         NULLIF(LTRIM(RTRIM(c.VENDEDOR)), ''), LTRIM(RTRIM(v.NOMBRE))
+  from cand c
+  left join CINCOH.VENDEDOR v ON v.VENDEDOR = c.VENDEDOR
+  where c.RN = 1;
+  end;
+
+DECLARE @FechaDesde DATETIME = DATEADD(MONTH, -6, CAST(GETDATE() AS DATE));
+DECLARE @Cia        VARCHAR(10) = 'CINCOH';
+
+BEGIN TRY
+    BEGIN TRAN;
+
+    /* Limpia el historial anterior (si es carga completa) */
+    DELETE FROM erpadmin.alFAC_DET_HIST_PED WHERE COD_CIA = @Cia;
+    DELETE FROM erpadmin.alFAC_ENC_HIST_PED WHERE COD_CIA = @Cia;
+
+    /* ===== ENCABEZADO ===== */
+    INSERT INTO erpadmin.alFAC_ENC_HIST_PED
+        (COD_CIA, NUM_PED, MON_PED, EST_PED, COD_CLT, COD_ZON, FEC_PED,
+         DESC1, DESC2, MONT_DESC1, MONT_DESC2, ACTIVIDAD_COMERCIAL)
+    SELECT  @Cia,
+            p.PEDIDO,
+            p.TOTAL_A_FACTURAR,
+            p.ESTADO,
+            p.CLIENTE,
+            rc.RUTA,
+            p.FECHA_PEDIDO,
+            p.PORC_DESCUENTO1,
+            p.PORC_DESCUENTO2,
+            p.MONTO_DESCUENTO1,
+            p.MONTO_DESCUENTO2,
+            p.ACTIVIDAD_COMERCIAL
+    FROM CINCOH.PEDIDO p
+    INNER JOIN (SELECT DISTINCT RUTA, CLIENTE
+                FROM erpadmin.RUTA_CLIENTE) rc
+            ON rc.CLIENTE = p.CLIENTE
+    WHERE p.FECHA_PEDIDO >= @FechaDesde
+      -- AND p.ESTADO <> 'C'          -- descomenta si no quieres cancelados
+      AND NOT EXISTS (SELECT 1
+                      FROM erpadmin.alFAC_ENC_HIST_PED h
+                      WHERE h.COD_CIA = @Cia
+                        AND h.NUM_PED = p.PEDIDO
+                        AND h.COD_ZON = rc.RUTA);
+
+    /* ===== DETALLE ===== */
+    
+	    /* ===== DETALLE ===== */
+    INSERT INTO erpadmin.alFAC_DET_HIST_PED
+        (NUM_PED, COD_ART, NUM_LN, COD_CIA, EST_BON,
+         CANT_PED, CANT_FAC, CANT_CNL, CANT_BKO,
+         MONT_LN, EST_LN, MONT_DESC, PRC_DESC)
+    SELECT  pl.PEDIDO,
+            pl.ARTICULO,
+            pl.PEDIDO_LINEA,
+            @Cia,
+            CASE WHEN pl.PEDIDO_LINEA_BONIF IS NOT NULL THEN 'B' ELSE 'V' END,
+            x.CANTIDAD,                                   -- CANT_PED
+            pl.CANTIDAD_FACTURADA,
+            pl.CANTIDAD_CANCELADA,
+            CASE WHEN x.CANTIDAD - pl.CANTIDAD_FACTURADA - pl.CANTIDAD_CANCELADA > 0
+                 THEN x.CANTIDAD - pl.CANTIDAD_FACTURADA - pl.CANTIDAD_CANCELADA
+                 ELSE 0 END,                              -- CANT_BKO
+            pl.PRECIO_UNITARIO * x.CANTIDAD,              -- MONT_LN
+            pl.ESTADO,
+            pl.MONTO_DESCUENTO,
+            pl.PORC_DESCUENTO
+    FROM CINCOH.PEDIDO_LINEA pl
+    CROSS APPLY (SELECT CASE WHEN ISNULL(pl.CANTIDAD_A_FACTURA, 0) = 0
+                             THEN ISNULL(pl.CANTIDAD_BONIFICAD, 0)
+                             ELSE pl.CANTIDAD_A_FACTURA
+                        END AS CANTIDAD) x
+    WHERE EXISTS (SELECT 1
+                  FROM erpadmin.alFAC_ENC_HIST_PED e
+                  WHERE e.COD_CIA = @Cia
+                    AND e.NUM_PED = pl.PEDIDO)
+      AND NOT EXISTS (SELECT 1
+                      FROM erpadmin.alFAC_DET_HIST_PED d
+                      WHERE d.NUM_PED = pl.PEDIDO
+                        AND d.COD_ART = pl.ARTICULO
+                        AND d.NUM_LN  = pl.PEDIDO_LINEA);
+    COMMIT;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK;
+    THROW;
+END CATCH;
+
+
+--DECLARE @FechaDesde DATETIME = DATEADD(MONTH, -6, CAST(GETDATE() AS DATE));
+--DECLARE @Cia        VARCHAR(10) = 'CINCOH';
+
+BEGIN TRY
+    BEGIN TRAN;
+
+    /* Limpia el historial anterior (si es carga completa) */
+    DELETE FROM erpadmin.alFAC_DET_HIST_FAC WHERE COD_CIA = @Cia;
+    DELETE FROM erpadmin.alFAC_ENC_HIST_FAC WHERE COD_CIA = @Cia;
+
+    /* ===== ENCABEZADO ===== */
+    INSERT INTO erpadmin.alFAC_ENC_HIST_FAC
+        (COD_CIA, NUM_FAC, MON_FAC, COD_CLT, COD_ZON, NUM_PED, FEC_FAC,
+         ANULAR, NCF, COD_CND, DESC1, DESC2, MONT_DESC1, MONT_DESC2,
+         ACTIVIDAD_COMERCIAL, ESTADO_COMPROBANTE)
+    SELECT  @Cia,
+            f.FACTURA,
+            f.TOTAL_FACTURA,
+            f.CLIENTE,
+            rc.RUTA,
+            f.PEDIDO,
+            f.FECHA,
+            f.ANULADA,
+            NULL,                    -- NCF: no hay columna equivalente en FACTURA
+            f.CONDICION_PAGO,
+            f.PORC_DESCUENTO1,
+            f.PORC_DESCUENTO2,
+            f.MONTO_DESCUENTO1,
+            f.MONTO_DESCUENTO2,
+            f.ACTIVIDAD_COMERCIAL,
+            f.vendedor                     -- ESTADO_COMPROBANTE
+    FROM CINCOH.FACTURA f
+    INNER JOIN (SELECT DISTINCT RUTA, CLIENTE
+                FROM erpadmin.RUTA_CLIENTE) rc
+            ON rc.CLIENTE = f.CLIENTE
+    WHERE f.TIPO_DOCUMENTO = 'F'
+      AND f.FECHA >= @FechaDesde
+      -- AND f.ANULADA = 'N'          -- descomenta si no quieres anuladas
+      AND NOT EXISTS (SELECT 1
+                      FROM erpadmin.alFAC_ENC_HIST_FAC h
+                      WHERE h.COD_CIA = @Cia
+                        AND h.NUM_FAC = f.FACTURA
+                        AND h.COD_ZON = rc.RUTA);
+
+    
+       /* ===== DETALLE ===== */
+    INSERT INTO erpadmin.alFAC_DET_HIST_FAC
+        (NUM_FAC, COD_ART, NUM_LN, COD_CIA, CANT_FAC, CANT_DEV, PRE_UNI,
+         MONT_LN, EST_BON, LOTE, MONT_DESC, INDICADOR_FACTURACION)
+    SELECT  fl.FACTURA,
+            fl.ARTICULO,
+            fl.LINEA,
+            @Cia,
+            fl.CANTIDAD,
+            fl.CANTIDAD_DEVUELT,
+            fl.PRECIO_UNITARIO,
+            fl.PRECIO_TOTAL,
+            CASE WHEN ISNULL(fl.DESCUENTO_VOLUMEN, 0) > 0 THEN 'B' ELSE 'V' END,
+            fl.LOTE,
+            fl.DESC_TOT_LINEA,
+            NULL
+    FROM CINCOH.FACTURA_LINEA fl
+    WHERE fl.TIPO_DOCUMENTO = 'F'
+      AND EXISTS (SELECT 1
+                  FROM erpadmin.alFAC_ENC_HIST_FAC e
+                  WHERE e.COD_CIA = @Cia
+                    AND e.NUM_FAC = fl.FACTURA)
+      AND NOT EXISTS (SELECT 1
+                      FROM erpadmin.alFAC_DET_HIST_FAC d
+                      WHERE d.COD_CIA = @Cia
+                        AND d.NUM_FAC = fl.FACTURA
+                        AND d.COD_ART = fl.ARTICULO
+                        AND d.NUM_LN  = fl.LINEA);
+    COMMIT;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK;
+    THROW;
+END CATCH;
+GO
