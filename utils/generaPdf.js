@@ -11,6 +11,7 @@ const { sequelize } = require("../config/mssql");
 const { QueryTypes } = require("sequelize");
 const { Sqlempresa } = require("../sqltx/sql");
 const { numeroControl } = require("./numeroControl");
+const { ubicacion, apendiceExtra, observacionesPdf } = require("./pdfV2");
 
 // Logo de la empresa emisora (empresa.logoUrl guarda base64). Sin logo, queda en blanco.
 const getLogoBase64 = (empresa) => {
@@ -86,18 +87,21 @@ const generaPdf = async (datos, _ano, empresa_id) => {
   );
   const _idDte = _dte[0].Dte_Id;
   // detalle de dte Cuerpo
+  // ARTICULO y lote van con LEFT JOIN: las líneas de servicio (sin lote) también se imprimen.
+  // Sin lote se usa la descripción guardada en cuerpoDocumento (la del servicio) en lugar
+  // del nombre genérico del artículo.
   const _dteCuerpo = await sequelize.query(
-    `SELECT fl.bodega, art.articulo as articulo , art.DESCRIPCION as nombre, cu.cantidad, cu.precioUni, cu.montoDescu,
+    `SELECT fl.bodega, COALESCE(art.articulo, cu.codigo) as articulo,
+     CASE WHEN lo.LOTE IS NULL THEN cu.descripcion ELSE COALESCE(art.DESCRIPCION, cu.descripcion) END as nombre,
+     cu.cantidad, cu.precioUni, cu.montoDescu,
      fl.PORC_DESC_LIN as porDesc, cu.ventaNoSuj + cu.ventaExenta + cu.ventaGravada as totalLinea,
-     fl.lote, CONVERT(varchar, lo.FECHA_VENCIMIENTO, 105) as fechaVence
-     FROM dte.dbo.cuerpoDocumento cu,
-     dte.dbo.dtes dte,
-     COAGRO2.${empresa[0].esquemaBD}.factura_Linea fl,
-     COAGRO2.${empresa[0].esquemaBD}.ARTICULO art,
-     COAGRO2.${empresa[0].esquemaBD}.lote lo
-     WHERE cu.dte_id=${_idDte} AND cu.dte_Id=dte.Dte_Id AND dte.Dte=fl.factura
-     AND cu.numItem=fl.LINEA + 1 AND fl.articulo=art.articulo
-     AND fl.articulo=lo.articulo AND fl.lote=lo.LOTE
+     lo.LOTE as lote, CONVERT(varchar, lo.FECHA_VENCIMIENTO, 105) as fechaVence
+     FROM dte.dbo.cuerpoDocumento cu
+     JOIN dte.dbo.dtes dte ON cu.dte_Id=dte.Dte_Id
+     JOIN COAGRO2.${empresa[0].esquemaBD}.factura_Linea fl ON dte.Dte=fl.factura AND cu.numItem=fl.LINEA + 1
+     LEFT JOIN COAGRO2.${empresa[0].esquemaBD}.ARTICULO art ON fl.articulo=art.articulo
+     LEFT JOIN COAGRO2.${empresa[0].esquemaBD}.lote lo ON fl.articulo=lo.articulo AND fl.lote=lo.LOTE
+     WHERE cu.dte_id=${_idDte}
      ORDER BY cu.numItem
     `,
     { type: QueryTypes.SELECT },
@@ -214,7 +218,10 @@ const generaPdf = async (datos, _ano, empresa_id) => {
       numItem: i + 1,
       codigo: l.articulo || "",
       cantidad: cantidad.toFixed(0),
-      descripcion: l.nombre,
+      // Sin lote (servicios): quita el sufijo " LOTE:... FECHA_VENCE:..." de documentos ya emitidos.
+      descripcion: l.lote
+        ? l.nombre
+        : String(l.nombre || "").replace(/\s*LOTE:.*$/, "").trim(),
       precioUni: fmt(precioUni),
       porDesc: porDesc.toFixed(0),
       precioDescuento: fmt(precioDesc),
@@ -304,6 +311,11 @@ const generaPdf = async (datos, _ano, empresa_id) => {
     apDirecion: ApDirecion,
     zona: ApMunicipio,
     needsSecondPage: prodlist.length >= 6,
+    // DTE v2.0: solo se agregan (vacíos en documentos v1 -> no se imprimen)
+    ubicacionEmisor: await ubicacion(_dteEmisior[0].direccion_depa, _dteEmisior[0].direccion_dist),
+    ubicacionReceptor: await ubicacion(_dteReceptor[0].direccion_depa, _dteReceptor[0].direccion_dist),
+    observacionesPdf: observacionesPdf(ApObservaciones),
+    apendiceExtra: apendiceExtra(_apendice),
   };
 
   const compiledHtml = hbs.compile(html)({ products: obj });
@@ -632,6 +644,11 @@ const generaPdf05 = async (datos, _ano, _empresa) => {
     descripcion: ApDescripcion,
     cliente: ApCliente,
     apDirecion: ApDirecion,
+    // DTE v2.0: solo se agregan (vacíos en documentos v1 -> no se imprimen)
+    ubicacionEmisor: await ubicacion(_dteEmisior[0].direccion_depa, _dteEmisior[0].direccion_dist),
+    ubicacionReceptor: await ubicacion(_dteReceptor[0].direccion_depa, _dteReceptor[0].direccion_dist),
+    // La caja de apéndice ya muestra vendedor-nombre, observación, cliente y dirección
+    apendiceExtra: apendiceExtra(_apendice, ["NOMBRE", "DIRECION"]),
   };
 
   const compiledHtml = hbs.compile(html)({ products: obj });
@@ -659,7 +676,7 @@ const generaPdf14 = async (datos, _ano, _empresa) => {
   const _idDte = _dte[0].Dte_Id;
 
   const _dteSujetoExcluido = await sequelize.query(
-    `SELECT tipoDocumento,nit, nombre,codActividad,descActividad,direccion_depa,direccion_muni,direccion_compl,telefono,correo  FROM dte.dbo.subjetoExcluido  WHERE dte_Id=${_idDte} `,
+    `SELECT *  FROM dte.dbo.subjetoExcluido  WHERE dte_Id=${_idDte} `,
     { type: QueryTypes.SELECT },
   );
 
@@ -779,6 +796,12 @@ const generaPdf14 = async (datos, _ano, _empresa) => {
     reteRenta: _dteResumen[0].reteRenta.toFixed(2),
     totalPagar: _dteResumen[0].totalPagar.toFixed(2),
     totalLetras: _dteResumen[0].totalLetras,
+    // DTE v2.0: solo se agregan (vacíos en documentos v1 -> no se imprimen)
+    ubicacionEmisor: await ubicacion(_dteEmisior[0].direccion_depa, _dteEmisior[0].direccion_dist),
+    ubicacionReceptor: await ubicacion(
+      _dteSujetoExcluido[0].direccion_depa,
+      _dteSujetoExcluido[0].direccion_dist
+    ),
   };
 
   const compiledHtml = hbs.compile(html)({ products: obj });

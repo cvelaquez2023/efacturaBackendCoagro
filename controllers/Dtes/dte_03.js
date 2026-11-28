@@ -13,7 +13,9 @@ const {
   firmaMH,
   autorizacionMh,
   apendice,
+  esV2,
 } = require("../../config/MH");
+const { aV2 } = require("../../utils/dteV2");
 const logger = require("../../utils/logger");
 const { notifyError } = require("../../utils/errorNotifier");
 const {
@@ -47,6 +49,17 @@ const {
 const generaPdf = require("../../utils/generaPdf");
 const { generaPdfTicket } = require("../../utils/pdfMakeTicket");
 const { resourceLimits } = require("worker_threads");
+
+/**
+ * Descripción de la línea para el DTE. Solo agrega LOTE y FECHA_VENCE cuando la
+ * línea tiene lote; los servicios (sin lote) quedan con su descripción limpia.
+ */
+const descripcionLinea = (element) => {
+  const descripcion = String(element.DESCRIPCION ?? "").trim();
+  const lote = String(element.LOTE ?? "").trim();
+  if (!lote) return descripcion;
+  return descripcion + " LOTE:" + lote + " FECHA_VENCE:" + element.FECHAVENCE;
+};
 //Credito Fiscal
 const postDte03 = async (req, res) => {
  try {
@@ -86,7 +99,7 @@ const postDte03 = async (req, res) => {
 
   const _identificacion = await identificacion("03", _empresa, _factura);
   const _emisor = await emisor(empresa, "03");
-  const _receptor = await receptor(_factura, "03", empresa[0].esquemaBD);
+  const _receptor = await receptor(_factura, "03", empresa[0].esquemaBD, empresa);
   const _cuerpo = await cuerpoDoc(
     _factura,
     _docExit[0].SUBTIPO,
@@ -118,7 +131,7 @@ const postDte03 = async (req, res) => {
     _correoVendedor = "factura@coagro.com";
   }
 
-  const dte = {
+  const dteV1 = {
     identificacion: _identificacion,
     documentoRelacionado: null,
     emisor: _emisor,
@@ -130,6 +143,8 @@ const postDte03 = async (req, res) => {
     extension: _extension,
     apendice: _apendice,
   };
+  // DTE v2.0: se firma, envía y entrega la versión ajustada; BD sigue con _resumen
+  const dte = esV2(empresa, "03") ? aV2(dteV1, "03") : dteV1;
 
   const datafirma = {
     nit: empresa[0].nit,
@@ -279,17 +294,9 @@ const postDte03 = async (req, res) => {
       _factura,
       _empresa
     );
+    // El JSON entregado es el mismo que se firmó
     const JsonCliente = {
-      identificacion: _identificacion,
-      documentoRelacionado: null,
-      emisor: _emisor,
-      receptor: _receptor,
-      otrosDocumentos: null,
-      ventaTercero: null,
-      cuerpoDocumento: _cuerpo,
-      resumen: _resumen,
-      extension: null,
-      apendice: _apendice,
+      ...dte,
       respuestaMh: _respuestaMH,
       firma: _firma,
     };
@@ -403,17 +410,9 @@ const postDte03 = async (req, res) => {
       }
     }
   } else {
+    // El JSON entregado es el mismo que se firmó
     const JsonCliente = {
-      identificacion: _identificacion,
-      documentoRelacionado: null,
-      emisor: _emisor,
-      receptor: _receptor,
-      otrosDocumentos: null,
-      ventaTercero: null,
-      cuerpoDocumento: _cuerpo,
-      resumen: _resumen,
-      extension: null,
-      apendice: _apendice,
+      ...dte,
       firma: _firma,
     };
 
@@ -621,12 +620,7 @@ try {
           numeroDocumento: null,
           codigo: element.ARTICULO,
           codTributo: null,
-          descripcion:
-            element.DESCRIPCION +
-            " LOTE:" +
-            element.LOTE +
-            " FECHA_VENCE:" +
-            element.FECHAVENCE,
+          descripcion: descripcionLinea(element),
           cantidad: element.CANTIDAD,
           uniMedida: 59,
           precioUni: precio,
@@ -831,12 +825,7 @@ else {
           numeroDocumento: null,
           codigo: element.ARTICULO,
           codTributo: null,
-          descripcion:
-            element.DESCRIPCION +
-            " LOTE:" +
-            element.LOTE +
-            " FECHA_VENCE:" +
-            element.FECHAVENCE,
+          descripcion: descripcionLinea(element),
           cantidad: element.CANTIDAD,
           uniMedida: 59,
           precioUni: precio,
@@ -899,12 +888,7 @@ else {
       numeroDocumento: null,
       codigo: element.ARTICULO,
       codTributo: null,
-      descripcion:
-        element.DESCRIPCION +
-        " LOTE:" +
-        element.LOTE +
-        " FECHA_VENCE:" +
-        element.FECHAVENCE,
+      descripcion: descripcionLinea(element),
       cantidad: element.CANTIDAD,
       uniMedida: 59,
       precioUni: precio,

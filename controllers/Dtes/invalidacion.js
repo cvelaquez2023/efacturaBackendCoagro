@@ -11,6 +11,7 @@ const {
 const moment = require("moment");
 const doc = require("pdfkit");
 const { emailInvalidado } = require("../../utils/email");
+const { numeroControl } = require("../../utils/numeroControl");
 const logger = require("../../utils/logger");
 const { notifyError } = require("../../utils/errorNotifier");
 
@@ -20,6 +21,7 @@ const postInvalidar = async (req, res) => {
       empresa_id,
       documento,
       tipoAnulacion,
+      codigoGeneracionR,
       motivoAnulacion,
       nombreResponsable,
       tipoDocResponsable,
@@ -28,6 +30,24 @@ const postInvalidar = async (req, res) => {
       numDocSolicita,
       tipoDocSolicita,
     } = req.body;
+
+    // CAT-024: 1 = error en la información y 3 = otro exigen el código de generación
+    // del DTE que reemplaza al invalidado; 2 = rescindir la operación no lo lleva.
+    const _tipoAnulacion = Number(tipoAnulacion) || 2;
+    if (![1, 2, 3].includes(_tipoAnulacion)) {
+      return res.send({ success: false, errors: ["Tipo de invalidación no válido (1, 2 o 3)"] });
+    }
+    const _codigoR =
+      _tipoAnulacion === 2 ? null : String(codigoGeneracionR || "").trim().toUpperCase() || null;
+    if (_tipoAnulacion !== 2) {
+      const formato = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
+      if (!_codigoR || !formato.test(_codigoR)) {
+        return res.send({
+          success: false,
+          errors: ["Para este tipo de invalidación indique el código de generación (36 caracteres) del DTE que lo reemplaza"],
+        });
+      }
+    }
     let estado = "";
     const _parte1 =documento.substring(16, 18) ;
     const _ano = '20'+_parte1;
@@ -45,6 +65,33 @@ const postInvalidar = async (req, res) => {
     }
 
     const datos = await SqlDte(documento, User[0].empresa);
+    if (datos.length === 0) {
+      return res.send({ success: false, errors: [`El documento ${documento} no existe para esta empresa`] });
+    }
+
+    // El DTE de reemplazo debe existir en esta empresa, estar aceptado por Hacienda
+    // y no ser el mismo que se invalida.
+    if (_codigoR) {
+      if (_codigoR === String(datos[0].codigoGeneracion || "").toUpperCase()) {
+        return res.send({ success: false, errors: ["El DTE de reemplazo no puede ser el mismo que se invalida"] });
+      }
+      const reemplazo = await sequelize.query(
+        `select top 1 Dte, tipoDoc, selloRecibido from dte.dbo.DTES
+          where upper(codigoGeneracion) = :codigo and Empresa_id = :empresa`,
+        { replacements: { codigo: _codigoR, empresa: User[0].empresa }, type: QueryTypes.SELECT }
+      );
+      if (reemplazo.length === 0) {
+        return res.send({ success: false, errors: [`No se encontró un DTE con el código de generación ${_codigoR} en esta empresa`] });
+      }
+      const sello = String(reemplazo[0].selloRecibido || "").trim();
+      if (!sello || sello.toUpperCase() === "ND") {
+        return res.send({
+          success: false,
+          errors: [`El DTE de reemplazo ${reemplazo[0].Dte} aún no ha sido aceptado por Hacienda (sin sello de recepción)`],
+        });
+      }
+    }
+
     const datosDte = await _receptor(datos[0].tipoDoc, datos[0].Dte_id);
     const _idDte = datosDte[0].dte_Id;
 
@@ -54,26 +101,50 @@ const postInvalidar = async (req, res) => {
     const fechaFormateada = fecha.format("YYYY-MM-DD");
     const horaFormateada = fecha.format("HH:mm:ss");
 
-    const _identificacion = {
-      version: empresa[0].versionInva,
-      ambiente: empresa[0].ambiente,
-      codigoGeneracion: _codigoGeneracion,
-      fecAnula: datos[0].fecEmi,
-      horAnula: horaFormateada,
-    };
+    // Normativa DTE v2.0: evento de invalidación v3
+    const _v3 = Number(empresa[0].versionInva) >= 3;
 
-    const _emisor = {
-      nit: empresa[0].nit,
-      nombre: empresa[0].nombre,
-      tipoEstablecimiento: empresa[0].tipoestablecimiento,
-      nomEstablecimiento: empresa[0].nombreComercial,
-      codEstableMH: "M001",
-      codEstable: empresa[0].codestable,
-      codPuntoVentaMH: "P001",
-      codPuntoVenta: empresa[0].codPuntoVenta,
-      telefono: empresa[0].telefono,
-      correo: empresa[0].correoDte,
-    };
+    const _identificacion = _v3
+      ? {
+          version: Number(empresa[0].versionInva),
+          ambiente: empresa[0].ambiente,
+          codigoGeneracion: _codigoGeneracion,
+          // v3: fecha/hora de generación del evento (antes fecAnula/horAnula)
+          fecEmi: fechaFormateada,
+          horEmi: horaFormateada,
+          fusion: null, // solo para absorbentes de sociedades fusionadas
+        }
+      : {
+          version: empresa[0].versionInva,
+          ambiente: empresa[0].ambiente,
+          codigoGeneracion: _codigoGeneracion,
+          fecAnula: datos[0].fecEmi,
+          horAnula: horaFormateada,
+        };
+
+    const _emisor = _v3
+      ? {
+          nit: empresa[0].nit,
+          nombre: empresa[0].nombre,
+          codEstableMH: empresa[0].codestableceMh || "M001",
+          codEstable: empresa[0].codestable,
+          codPuntoVentaMH: empresa[0].codPuntoVentaMh || "P001",
+          codPuntoVenta: empresa[0].codPuntoVenta,
+          telefono: empresa[0].telefono,
+          correo: empresa[0].correoDte,
+        }
+      : {
+          nit: empresa[0].nit,
+          nombre: empresa[0].nombre,
+          tipoEstablecimiento: empresa[0].tipoestablecimiento,
+          nomEstablecimiento: empresa[0].nombreComercial,
+          codEstableMH: "M001",
+          codEstable: empresa[0].codestable,
+          codPuntoVentaMH: "P001",
+          codPuntoVenta: empresa[0].codPuntoVenta,
+          telefono: empresa[0].telefono,
+          correo: empresa[0].correoDte,
+        };
     if (datos[0].tipoDoc === "11") {
       _dui = datosDte[0].nit;
       _tipoDo = "37";
@@ -103,19 +174,21 @@ const postInvalidar = async (req, res) => {
       tipoDte: datos[0].tipoDoc,
       codigoGeneracion: datos[0].codigoGeneracion,
       selloRecibido: datos[0].selloRecibido,
-      numeroControl: documento.replace(_ano2, "-"),
+      numeroControl: _v3 ? numeroControl(documento) : documento.replace(_ano2, "-"),
       fecEmi: datos[0].fecEmi,
       montoIva: iva,
-      codigoGeneracionR: null,
+      codigoGeneracionR: _codigoR,
       tipoDocumento: _tipoDo,
       numDocumento: _dui,
       nombre: datosDte[0].nombre,
       telefono: datosDte[0].telefono,
       correo: datosDte[0].correo,
     };
+    // v3 ya no lleva montoIva
+    if (_v3) delete _documento.montoIva;
 
     const _motivo = {
-      tipoAnulacion: tipoAnulacion,
+      tipoAnulacion: _tipoAnulacion,
       motivoAnulacion: motivoAnulacion,
       nombreResponsable: nombreResponsable,
       tipDocResponsable: tipoDocResponsable,
@@ -166,10 +239,12 @@ const postInvalidar = async (req, res) => {
 
     const postInvaliddardte = async () => {
       try {
-        const response = await fetch(
-          "https://api.dtes.mh.gob.sv/fesv/anulardte",
-          requestOptions
-        );
+        // Antes iba siempre a producción, aun con ambiente de pruebas
+        const url =
+          empresa[0].ambiente === "00"
+            ? "https://apitest.dtes.mh.gob.sv/fesv/anulardte"
+            : "https://api.dtes.mh.gob.sv/fesv/anulardte";
+        const response = await fetch(url, requestOptions);
         const data = await response.json();
         return data;
       } catch (error) {

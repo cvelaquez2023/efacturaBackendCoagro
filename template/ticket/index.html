@@ -241,6 +241,7 @@
     <div class="row2"><table><tr><td><span class="bold">NIT: </span>{{products.nitEmisor}}</td><td><span class="bold">NRC: </span>{{products.nrcEmisor}}</td></tr></table></div>
     <div class="field"><span class="label">Actividad Económica: </span>{{products.actividadEmisor}}</div>
     <div class="field"><span class="label">Dirección: </span>{{products.direccionEmisor}}</div>
+    {{#if products.ubicacionEmisor}}<div class="field"><span class="label">Distrito: </span>{{products.ubicacionEmisor}}</div>{{/if}}
     <div class="row2"><table><tr><td><span class="bold">Telefono: </span>{{products.telefonoEmisor}}</td><td><span class="bold">Correo: </span>{{products.correoEmisor}}</td></tr></table></div>
 
     <!-- DATOS DE FACTURACIÓN -->
@@ -257,6 +258,7 @@
     <div class="row2"><table><tr><td><span class="bold">NIT: </span>{{products.nitReceptor}}</td><td><span class="bold">NRC: </span>{{products.nrcReceptor}}</td></tr></table></div>
     <div class="field"><span class="label">Giro: </span>{{products.descActividadReceptor}}</div>
     <div class="field"><span class="label">Dirección: </span>{{products.direccionReceptor}}</div>
+    {{#if products.ubicacionReceptor}}<div class="field"><span class="label">Distrito: </span>{{products.ubicacionReceptor}}</div>{{/if}}
     <div class="field"><span class="label">Teléfono: </span>{{products.telefonoReceptor}}</div>
     <div class="field"><span class="label">Correo: </span>{{products.correoReceptor}}</div>
 
@@ -308,6 +310,8 @@
     <div class="pago-line">FORMA DE PAGO: {{products.formaPago}}</div>
     <div class="pago-line">DIAS DE CREDITO ASIGNADOS: {{products.diasCredito}}</div>
     <div class="pago-line">CODIGO VENDEDOR: {{products.vendedor}}</div>
+    {{#if products.observacionesPdf}}<div class="pago-line">OBSERVACIONES: {{products.observacionesPdf}}</div>{{/if}}
+    {{#each products.apendiceExtra}}<div class="pago-line">{{etiqueta}}: {{valor}}</div>{{/each}}
 
     <!-- NOTAS -->
     <div class="separator">---------------------------------- NOTAS ----------------------------------</div>

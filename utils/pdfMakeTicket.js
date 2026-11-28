@@ -7,6 +7,7 @@ const { sequelize } = require("../config/mssql");
 const { Sqlempresa } = require("../sqltx/sql");
 const { numeroControl } = require("./numeroControl");
 const { toString } = require("qrcode");
+const { ubicacion, apendiceExtra, observacionesPdf } = require("./pdfV2");
 
 const fmt = (value = 0) =>
   new Intl.NumberFormat("en-US", {
@@ -43,7 +44,7 @@ const generaPdfTicket = async (factura, _ano, empresa_id) => {
   const dteId = _dte[0].Dte_Id;
 
   const _receptor = await sequelize.query(
-    `SELECT nit, nrc, nombre, descActividad, nombreComercial, direccion_compl, telefono, correo
+    `SELECT *
      FROM dte.dbo.receptor WHERE dte_id=${dteId}`,
     { type: QueryTypes.SELECT }
   );
@@ -95,6 +96,17 @@ const generaPdfTicket = async (factura, _ano, empresa_id) => {
     `SELECT VALOR FROM dte.dbo.apendice WHERE dte_Id=${dteId} AND campo='NOMBRE'`,
     { type: QueryTypes.SELECT }
   );
+
+  // DTE v2.0: distrito del emisor tal como se envió, observaciones y demás apéndices
+  const _emisorDte = await sequelize.query(
+    `SELECT * FROM dte.dbo.emisor WHERE dte_id=${dteId}`,
+    { type: QueryTypes.SELECT }
+  );
+  const _apendiceTodo = await sequelize.query(
+    `SELECT * FROM dte.dbo.apendice WHERE dte_Id=${dteId}`,
+    { type: QueryTypes.SELECT }
+  );
+  const _obs = _apendiceTodo.find((a) => a.campo === "OBSERVACIONES");
 
   const vendedor =
     (_Vendedor.length > 0 ? _Vendedor[0].VALOR : "") +
@@ -230,6 +242,14 @@ const generaPdfTicket = async (factura, _ano, empresa_id) => {
     fechaDocumento: documentoData.fechaDocumento || "",
     fechaDocVence: documentoData.fechaDocVence || "",
     cliente: _Cliente.length > 0 ? _Cliente[0].VALOR : "",
+    // DTE v2.0: solo se agregan (vacíos en documentos v1 -> no se imprimen)
+    ubicacionEmisor: _emisorDte.length
+      ? await ubicacion(_emisorDte[0].direccion_depa, _emisorDte[0].direccion_dist)
+      : "",
+    ubicacionReceptor: await ubicacion(receptorData.direccion_depa, receptorData.direccion_dist),
+    observacionesPdf: observacionesPdf(_obs ? _obs.valor : ""),
+    // Vendedor (código-nombre) y cliente ya se imprimen
+    apendiceExtra: apendiceExtra(_apendiceTodo, ["NOMBRE"]),
   };
 
   const dir = _dte[0].tipoDoc === "03" ? "dte03" : "dte01";

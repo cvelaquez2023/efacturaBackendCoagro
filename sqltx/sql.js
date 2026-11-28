@@ -3,7 +3,7 @@ const { sequelize } = require("../config/mssql");
 
 const Sqlempresa = async (empresa) => {
   return await sequelize.query(
-    `SELECT  Empresa_id,nombre,nit,replace(nrc,'-','') as nrc,codActividad,desActividad,nombreComercial,tipoestablecimiento,departamento,municipio,complementoDir,telefono,correoDte,codestableceMh,codestable,codPuntoVentaMh,codPuntoVenta,userApi,pwdApi,pwdPrivado,pwdPublica,ambiente,versionDte01,versionDte03,versionDte05,versionDte06,versionDte07,versionDte08,versionDte09,versionDte11,versionDte14,versionDte15,activa,jwtSecret,emailEnvioDte,emailEnvioDtePass,tokenUser,fechaHoraToken,versionInva,versionConting,Contingencia,esquemaBD, urlLogo,logoUrl,formato FROM DTE.dbo.empresa where empresa_id=${empresa} and activa=1`,
+    `SELECT  Empresa_id,nombre,nit,replace(nrc,'-','') as nrc,codActividad,desActividad,nombreComercial,tipoestablecimiento,departamento,municipio,complementoDir,telefono,correoDte,codestableceMh,codestable,codPuntoVentaMh,codPuntoVenta,userApi,pwdApi,pwdPrivado,pwdPublica,ambiente,versionDte01,versionDte03,versionDte05,versionDte06,versionDte07,versionDte08,versionDte09,versionDte11,versionDte14,versionDte15,activa,jwtSecret,emailEnvioDte,emailEnvioDtePass,tokenUser,fechaHoraToken,versionInva,versionConting,Contingencia,esquemaBD, urlLogo,logoUrl,formato,distrito FROM DTE.dbo.empresa where empresa_id=${empresa} and activa=1`,
     { type: QueryTypes.SELECT }
   );
 };
@@ -187,8 +187,36 @@ const SqlProveedor = async (contribuyente,esquema) => {
     }
   );
 };
+/**
+ * Busca proveedores del ERP por código, nombre, alias o contribuyente (DUI/NIT).
+ * El texto va como parámetro (replacements), nunca concatenado. El esquema viene de
+ * DTE.dbo.empresa y se valida antes de usarlo como nombre de esquema.
+ */
+const SqlBuscarProveedores = async (texto, esquema, limite) => {
+  if (!/^[A-Za-z0-9_]+$/.test(String(esquema || ""))) {
+    throw new Error("Esquema de empresa no valido");
+  }
+  return await sequelize.query(
+    `SELECT TOP (${Number(limite) || 30})
+            RTRIM(PROVEEDOR) AS PROVEEDOR, RTRIM(NOMBRE) AS NOMBRE, RTRIM(ALIAS) AS ALIAS,
+            RTRIM(CONTRIBUYENTE) AS CONTRIBUYENTE, ACTIVO
+       FROM ${esquema}.PROVEEDOR
+      WHERE (:texto = ''
+         OR PROVEEDOR LIKE :patron
+         OR NOMBRE LIKE :patron
+         OR ALIAS LIKE :patron
+         OR CONTRIBUYENTE LIKE :patron)
+      ORDER BY NOMBRE`,
+    {
+      replacements: { texto, patron: `%${texto}%` },
+      type: QueryTypes.SELECT,
+    }
+  );
+};
+
 module.exports = {
   Sqlempresa,
+  SqlBuscarProveedores,
   SqlFactura,
   SqlCliente,
   SqlFacturaLinea,
