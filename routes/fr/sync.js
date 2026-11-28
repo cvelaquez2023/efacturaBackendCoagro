@@ -1,7 +1,7 @@
 // Sincronizacion de la handheld. Exige el token de POST /fr/mobile/login
 // (header Authorization: Bearer <token>) y rol RUTA. Las rutas salen de la
 // handheld del token (RUTA_ASIGNADA_RT), no de la URL.
-// Queda como GET /fr/sync/clientes, /clientesCia, /articulos, /lotes, /precios, /cobros, /cobrosAgente, /consecutivos, /configuracion, /cotizaciones, /historialPedidos, /historialFacturas,
+// Queda como GET /fr/sync/clientes, /clientesCia, /articulos, /lotes, /precios, /cobros, /cobrosAgente, /cobrosOtros, /consecutivos, /configuracion, /cotizaciones, /historialPedidos, /historialFacturas,
 // /historialPedidosRuta, /historialFacturasRuta, /cuentasBanco, /recibosPendientes, /metas, /descuentos,
 // /promociones, /promocionesProductos, /promocionesDestinos, /promocionesBonificados, /promocionales, /notasCredito, /inventarios, /empresa y /municipios,
 // y POST /fr/sync/enviar (la handheld sube lo registrado sin conexion, incluidos depositos).
@@ -15,6 +15,7 @@ const {
   getSyncArticulos,
   getSyncCobros,
   getSyncCobrosAgente,
+  getSyncCobrosOtros,
   getSyncConsecutivos,
   getSyncConfiguracion,
   getSyncClientesCia,
@@ -53,6 +54,7 @@ router.get("/articulos", getSyncArticulos);
 router.get("/lotes", getSyncLotes);
 router.get("/cobros", getSyncCobros);
 router.get("/cobrosAgente", getSyncCobrosAgente);
+router.get("/cobrosOtros", getSyncCobrosOtros);
 router.get("/consecutivos", getSyncConsecutivos);
 router.get("/configuracion", getSyncConfiguracion);
 router.get("/clientesCia", getSyncClientesCia);
