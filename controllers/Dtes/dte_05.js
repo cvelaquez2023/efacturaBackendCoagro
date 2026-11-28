@@ -329,6 +329,7 @@ await guardarObservacionesMH(
           );
           const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
+          fs.mkdirSync(path.dirname(newfile), { recursive: true });
           fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
           await emailRechazo(
             _identificacion.numeroControl,
@@ -352,7 +353,7 @@ await guardarObservacionesMH(
           });
           return;
         } catch (error) {
-          logger.error("Error capturado", { controller: "dte_05", action: "postDte05" });
+          logger.error("Error capturado: " + (error && error.message), { controller: "dte_05", action: "postDte05" });
         }
         //enviamos correo a contabilidad para que corrigan porque esta rechazado
       } else if (_respuestaMH.estado == "PROCESADO") {
@@ -369,6 +370,7 @@ await guardarObservacionesMH(
         );
         const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
+        fs.mkdirSync(path.dirname(newfile), { recursive: true });
         fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
         if (empresa[0].ambiente === "00") {
           await emailEnviado(
@@ -424,6 +426,7 @@ await guardarObservacionesMH(
     );
     const newfile = fileName + `${_identificacion.numeroControl}.json`;
 
+    fs.mkdirSync(path.dirname(newfile), { recursive: true });
     fs.writeFileSync(newfile, JSON.stringify(JsonCliente));
     await emailContingencia(
       _identificacion.numeroControl,
@@ -538,7 +541,7 @@ const docRelacionados = async (datos, esquema) => {
     }
     return datosRelacionados;
   } catch (error) {
-    logger.error("Error capturado", { controller: "dte_05", action: "postDte05" });
+    logger.error("Error capturado: " + (error && error.message), { controller: "dte_05", action: "postDte05" });
   }
 };
 
@@ -750,7 +753,7 @@ const cuerpoDocLote = async (_factura, _documento, esquema,empresa_id) => {
       return _cuerpoDoc;
     }
   } catch (error) {
-    logger.error("Error capturado", { controller: "dte_05", action: "postDte05" });
+    logger.error("Error capturado: " + (error && error.message), { controller: "dte_05", action: "postDte05" });
   }
 };
 
@@ -833,7 +836,7 @@ const resumen = async (_documento, esquema) => {
       return _resumen;
     }
   } catch (error) {
-    logger.error("Error capturado", { controller: "dte_05", action: "postDte05" });
+    logger.error("Error capturado: " + (error && error.message), { controller: "dte_05", action: "postDte05" });
   }
 };
 const buscarCCF = async (ccf, esquema) => {
@@ -871,7 +874,7 @@ const buscarCCF = async (ccf, esquema) => {
 
     return arryDoc;
   } catch (error) {
-    logger.error("Error capturado", { controller: "dte_05", action: "postDte05" });
+    logger.error("Error capturado: " + (error && error.message), { controller: "dte_05", action: "postDte05" });
   }
 };
 module.exports = postDte05;

@@ -816,4 +816,4 @@ const generaPdf14 = async (datos, _ano, _empresa) => {
   await generatePdfWithPuppeteer(compiledHtml, outputPath);
   console.log("PDF DTE-14 generado con Puppeteer:", outputPath);
 };
-module.exports = { generaPdf, generaPdf07, generaPdf05, generaPdf14, generatePdfWithPuppeteer };
+module.exports = { generaPdf, generaPdf07, generaPdf05, generaPdf14, generatePdfWithPuppeteer, getLogoBase64 };

@@ -2,6 +2,7 @@
 const { Sqlempresa, SqlDte } = require("../../sqltx/sql");
 const moment = require("moment");
 const { firmaMH, autorizacionMh } = require("../../config/MH");
+const { codigoMH, codigosDeNumeroControl } = require("../../utils/dteV2");
 const logger = require("../../utils/logger");
 const { notifyError } = require("../../utils/errorNotifier");
 
@@ -60,8 +61,11 @@ const contingencia = async (req, res) => {
     };
     if (_v4) {
       _identificacion.version = Number(empresa[0].versionConting);
-      _emisor.codEstableMH = empresa[0].codestableceMh || null;
-      _emisor.codPuntoVentaMH = empresa[0].codPuntoVentaMh || null;
+      // Formato S028 / P001: del número de control del documento, luego de la
+      // empresa; si ninguno cumple, null (el esquema v4 lo admite)
+      const _codDoc = codigosDeNumeroControl(documento);
+      _emisor.codEstableMH = codigoMH("estable", [_codDoc.estable, empresa[0].codestableceMh], null);
+      _emisor.codPuntoVentaMH = codigoMH("puntoVenta", [_codDoc.puntoVenta, empresa[0].codPuntoVentaMh], null);
     }
 
     const _detalleDte = [

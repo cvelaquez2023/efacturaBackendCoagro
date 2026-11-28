@@ -225,4 +225,34 @@ const aV2 = (dte, tipoDte) => {
   return d;
 };
 
-module.exports = { aV2 };
+/**
+ * Códigos de establecimiento / punto de venta asignados por el MH
+ * (emisor.codEstableMH y codPuntoVentaMH de invalidación v3 y contingencia v4).
+ * Hacienda exige el mismo formato que la sección 3 del número de control v2:
+ *   codEstableMH    = tipo establecimiento + 3 dígitos  (M|B|S|P)###  ej. S028
+ *   codPuntoVentaMH = P + 3 dígitos                                  ej. P001
+ * Con "0001" rechaza: "#/emisor/codEstableMH no cumple el formato requerido".
+ */
+const FORMATO_ESTABLE_MH = /^[MBSP][0-9]{3}$/;
+const FORMATO_PUNTO_VENTA_MH = /^P[0-9]{3}$/;
+
+const limpiarCodigo = (v) =>
+  v === null || v === undefined ? "" : String(v).trim().toUpperCase();
+
+// Sección 3 del número de control: "DTE-03-S028P001-..." -> { estable: "S028", puntoVenta: "P001" }
+const codigosDeNumeroControl = (numeroControl) => {
+  const m = limpiarCodigo(numeroControl).match(/^DTE-\d{2}-([MBSP][0-9]{3})(P[0-9]{3})-/);
+  return m ? { estable: m[1], puntoVenta: m[2] } : { estable: "", puntoVenta: "" };
+};
+
+/**
+ * Primer candidato que cumpla el formato; si ninguno, el respaldo.
+ * tipo: "estable" | "puntoVenta"
+ */
+const codigoMH = (tipo, candidatos, respaldo) => {
+  const formato = tipo === "puntoVenta" ? FORMATO_PUNTO_VENTA_MH : FORMATO_ESTABLE_MH;
+  const valido = candidatos.map(limpiarCodigo).find((c) => formato.test(c));
+  return valido || respaldo;
+};
+
+module.exports = { aV2, codigoMH, codigosDeNumeroControl };
